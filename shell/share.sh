@@ -293,7 +293,7 @@ git_clone_scripts() {
 
   set_proxy "$proxy"
 
-  git clone --depth=1 $part_cmd $url $dir
+  git clone -q --depth=1 $part_cmd $url $dir
   exit_status=$?
 
   unset_proxy
@@ -305,11 +305,23 @@ random_range() {
   echo $((RANDOM % ($end - $beg) + $beg))
 }
 
+delete_pm2() {
+  cd $dir_root
+  pm2 delete ecosystem.config.js
+}
+
 reload_pm2() {
   cd $dir_root
   restore_env_vars
   pm2 flush &>/dev/null
   pm2 startOrGracefulReload ecosystem.config.js
+}
+
+reload_update() {
+  cd $dir_root
+  restore_env_vars
+  pm2 flush &>/dev/null
+  pm2 startOrGracefulReload other.config.js
 }
 
 diff_time() {
