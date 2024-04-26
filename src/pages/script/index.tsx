@@ -218,8 +218,9 @@ const Script = () => {
         <>
           {intl.get('确认保存文件')}
           <Text style={{ wordBreak: 'break-all' }} type="warning">
+            {' '}
             {currentNode.title}
-          </Text>{' '}
+          </Text>
           {intl.get('，保存后不可恢复')}
         </>
       ),
@@ -258,7 +259,8 @@ const Script = () => {
         <>
           {intl.get('确认删除')}
           <Text style={{ wordBreak: 'break-all' }} type="warning">
-            {select}
+            {' '}
+            {select}{' '}
           </Text>
           {intl.get('文件')}
           {currentNode.type === 'directory' ? intl.get('夹及其子文件') : ''}

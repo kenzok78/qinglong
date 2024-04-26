@@ -1121,7 +1121,7 @@ function fsBotNotify(text, desp) {
             console.log(err);
           } else {
             data = JSON.parse(data);
-            if (data.StatusCode === 0) {
+            if (data.StatusCode === 0 || data.code === 0) {
               console.log('飞书发送通知消息成功🎉\n');
             } else {
               console.log(`${data.msg}\n`);
@@ -1379,7 +1379,7 @@ function parseHeaders(headers) {
 
 function parseBody(body, contentType, valueFormatFn) {
   if (contentType === 'text/plain' || !body) {
-    return body;
+    return valueFormatFn && body ? valueFormatFn(body) : body;
   }
 
   const parsed = parseString(body, valueFormatFn);
@@ -1407,6 +1407,7 @@ function formatBodyFun(contentType, body) {
     case 'multipart/form-data':
       return { form: body };
     case 'application/x-www-form-urlencoded':
+    case 'text/plain':
       return { body };
   }
   return {};
