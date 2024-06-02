@@ -75,31 +75,28 @@ export default class SubscriptionService {
   }
 
   public async handleTask(
-    _doc: Subscription,
+    doc: Subscription,
     needCreate = true,
     runImmediately = false,
   ) {
-    const { url } = formatUrl(_doc);
+    const { url } = formatUrl(doc);
 
-    const doc = {
-      ..._doc,
-      command: formatCommand(_doc, url as string),
-    } as Omit<Subscription, 'command'> & { command: string };
+    doc.command = formatCommand(doc, url as string);
 
     if (doc.schedule_type === 'crontab') {
-      this.scheduleService.cancelCronTask(doc);
+      this.scheduleService.cancelCronTask(doc as any);
       needCreate &&
         (await this.scheduleService.createCronTask(
-          doc,
+          doc as any,
           this.taskCallbacks(doc),
           runImmediately,
         ));
-    } else {
-      this.scheduleService.cancelIntervalTask(doc);
-      const { type, value } = doc.interval_schedule!;
+    } else if (doc.interval_schedule) {
+      this.scheduleService.cancelIntervalTask(doc as any);
+      const { type, value } = doc.interval_schedule;
       needCreate &&
         (await this.scheduleService.createIntervalTask(
-          doc,
+          doc as any,
           { [type]: value } as SimpleIntervalSchedule,
           runImmediately,
           this.taskCallbacks(doc),
