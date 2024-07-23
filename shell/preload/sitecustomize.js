@@ -1,4 +1,12 @@
+const { execSync } = require('child_process');
+const { sendNotify } = require('./notify.js');
 require(`./env.js`);
+
+function initGlobal() {
+  global.QLAPI = {
+    notify: sendNotify,
+  };
+}
 
 function expandRange(rangeStr, max) {
   const tempRangeStr = rangeStr
@@ -17,8 +25,43 @@ function expandRange(rangeStr, max) {
 }
 
 function run() {
-  if (process.env.envParam && process.env.numParam) {
-    const { envParam, numParam } = process.env;
+  const {
+    envParam,
+    numParam,
+    file_task_before,
+    file_task_before_js,
+    dir_scripts,
+    task_before,
+  } = process.env;
+
+  require(file_task_before_js);
+
+  try {
+    const splitStr = '__sitecustomize__';
+    const fileName = process.argv[1].replace(`${dir_scripts}/`, '');
+    let command = `bash -c "source ${file_task_before} ${fileName}`;
+    if (task_before) {
+      command = `${command} && echo -e '执行前置命令\n' && eval "${task_before}" && echo -e '\n执行前置命令结束\n'`;
+    }
+    const res = execSync(
+      `${command} && echo "${splitStr}" && NODE_OPTIONS= node -p 'JSON.stringify(process.env)'"`,
+      {
+        encoding: 'utf-8',
+      },
+    );
+    const [output, envStr] = res.split(splitStr);
+    const newEnvObject = JSON.parse(envStr.trim());
+    for (const key in newEnvObject) {
+      process.env[key] = newEnvObject[key];
+    }
+    console.log(output);
+  } catch (error) {
+    if (!error.message.includes('spawnSync /bin/sh E2BIG')) {
+      console.log(`run task before error: `, error);
+    }
+  }
+
+  if (envParam && numParam) {
     const array = (process.env[envParam] || '').split('&');
     const runArr = expandRange(numParam, array.length);
     const arrayRun = runArr.map((i) => array[i - 1]);
@@ -27,4 +70,9 @@ function run() {
   }
 }
 
-run();
+try {
+  initGlobal();
+  run();
+} catch (error) {
+  console.log(`run builtin code error: `, error, '\n');
+}
