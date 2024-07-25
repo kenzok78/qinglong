@@ -37,7 +37,8 @@ def expand_range(range_str, max_value):
         range_match = re.match(r"^(\d+)([-~_])(\d+)$", part)
         if range_match:
             start, _, end = map(try_parse_int, range_match.groups())
-            result.extend(range(start, end + 1))
+            step = 1 if start < end else -1
+            result.extend(range(start, end + step, step))
         else:
             result.append(int(part))
 
@@ -54,7 +55,7 @@ def run():
         task_before = os.getenv("task_before")
 
         if task_before:
-            command += f" && echo -e '执行前置命令\n' && eval '{task_before}' && echo -e '\n执行前置命令结束\n'"
+            command += f" && echo -e '执行前置命令\n' && eval '{task_before.replace('"', '\\"')}' && echo -e '\n执行前置命令结束\n'"
 
         python_command = "PYTHONPATH= python3 -c 'import os, json; print(json.dumps(dict(os.environ)))'"
         command += f" && echo -e '{split_str}' && {python_command}\""
