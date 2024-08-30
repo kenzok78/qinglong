@@ -15,6 +15,7 @@ import {
   parseVersion,
   promiseExec,
   readDirs,
+  rmPath,
 } from '../config/util';
 import {
   DependenceModel,
@@ -34,6 +35,7 @@ import NotificationService from './notify';
 import ScheduleService, { TaskCallbacks } from './schedule';
 import SockService from './sock';
 import os from 'os';
+import dayjs from 'dayjs';
 
 @Service()
 export default class SystemService {
@@ -90,17 +92,22 @@ export default class SystemService {
       info: { ...oDoc.info, ...info },
     });
     const cron = {
-      id: result.id || NaN,
+      id: result.id as number,
       name: '删除日志',
       command: `ql rmlog ${info.logRemoveFrequency}`,
+      runOrigin: 'system' as const,
     };
     if (oDoc.info?.logRemoveFrequency) {
       await this.scheduleService.cancelIntervalTask(cron);
     }
     if (info.logRemoveFrequency && info.logRemoveFrequency > 0) {
-      this.scheduleService.createIntervalTask(cron, {
-        days: info.logRemoveFrequency,
-      });
+      this.scheduleService.createIntervalTask(
+        cron,
+        {
+          days: info.logRemoveFrequency,
+        },
+        true,
+      );
     }
     return { code: 200, data: info };
   }
@@ -176,6 +183,8 @@ export default class SystemService {
       },
       {
         command,
+        id: 'update-node-mirror',
+        runOrigin: 'system',
       },
     );
   }
@@ -250,6 +259,8 @@ export default class SystemService {
       },
       {
         command,
+        id: 'update-linux-mirror',
+        runOrigin: 'system',
       },
     );
   }
@@ -266,7 +277,7 @@ export default class SystemService {
             timeout: 30000,
           },
         );
-        lastVersionContent = await parseContentVersion(result.body);
+        lastVersionContent = parseContentVersion(result.body);
       } catch (error) {}
 
       if (!lastVersionContent) {
@@ -361,6 +372,8 @@ export default class SystemService {
     }
     this.scheduleService.runTask(`real_time=true ${command}`, callback, {
       command,
+      id: command.replace(/ /g, '-'),
+      runOrigin: 'system',
     });
   }
 
@@ -409,9 +422,25 @@ export default class SystemService {
     }
   }
 
-  public async getSystemLog(res: Response) {
+  public async getSystemLog(
+    res: Response,
+    query: {
+      startTime?: string;
+      endTime?: string;
+    },
+  ) {
+    const startTime = dayjs(query.startTime || undefined)
+      .startOf('d')
+      .valueOf();
+    const endTime = dayjs(query.endTime || undefined)
+      .endOf('d')
+      .valueOf();
     const result = await readDirs(config.systemLogPath, config.systemLogPath);
-    const logs = result.reverse().filter((x) => x.title.endsWith('.log'));
+    const logs = result
+      .reverse()
+      .filter((x) => x.title.endsWith('.log'))
+      .filter((x) => x.mtime >= startTime && x.mtime <= endTime);
+
     res.set({
       'Content-Length': sum(logs.map((x) => x.size)),
     });
@@ -432,5 +461,13 @@ export default class SystemService {
         currentFileStream.pipe(res, { end: false });
       }
     })(res, logs);
+  }
+
+  public async deleteSystemLog() {
+    const result = await readDirs(config.systemLogPath, config.systemLogPath);
+    const logs = result.reverse().filter((x) => x.title.endsWith('.log'));
+    for (const log of logs) {
+      await rmPath(path.join(config.systemLogPath, log.title));
+    }
   }
 }

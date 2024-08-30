@@ -17,6 +17,7 @@ export interface ScheduleTaskType {
   command: string;
   name?: string;
   schedule?: string;
+  runOrigin: 'subscription' | 'system' | 'script';
 }
 
 export interface TaskCallbacks {
@@ -40,9 +41,13 @@ export default class ScheduleService {
 
   private intervalSchedule = new ToadScheduler();
 
-  private maxBuffer = 200 * 1024 * 1024;
+  private taskLimitMap = {
+    system: 'runWithSystemLimit' as const,
+    script: 'runWithScriptLimit' as const,
+    subscription: 'runWithSubscriptionLimit' as const,
+  };
 
-  constructor(@Inject('logger') private logger: winston.Logger) { }
+  constructor(@Inject('logger') private logger: winston.Logger) {}
 
   async runTask(
     command: string,
@@ -51,12 +56,21 @@ export default class ScheduleService {
       schedule?: string;
       name?: string;
       command?: string;
+      id: string;
+      runOrigin: 'subscription' | 'system' | 'script';
     },
     completionTime: 'start' | 'end' = 'end',
   ) {
-    return taskLimit.runWithCronLimit(() => {
+    const { runOrigin, ...others } = params;
+
+    return taskLimit[this.taskLimitMap[runOrigin]](others, () => {
       return new Promise(async (resolve, reject) => {
-        this.logger.info(`[panel][开始执行任务] 参数 ${JSON.stringify({ ...params, command })}`);
+        this.logger.info(
+          `[panel][开始执行任务] 参数 ${JSON.stringify({
+            ...others,
+            command,
+          })}`,
+        );
 
         try {
           const startTime = dayjs();
@@ -96,7 +110,7 @@ export default class ScheduleService {
               endTime,
               endTime.diff(startTime, 'seconds'),
             );
-            resolve({ ...params, pid: cp.pid, code });
+            resolve({ ...others, pid: cp.pid, code });
           });
         } catch (error) {
           this.logger.error(
@@ -111,7 +125,7 @@ export default class ScheduleService {
   }
 
   async createCronTask(
-    { id = 0, command, name, schedule = '' }: ScheduleTaskType,
+    { id = 0, command, name, schedule = '', runOrigin }: ScheduleTaskType,
     callbacks?: TaskCallbacks,
     runImmediately = false,
   ) {
@@ -131,6 +145,8 @@ export default class ScheduleService {
           name,
           schedule,
           command,
+          id: _id,
+          runOrigin,
         });
       }),
     );
@@ -140,6 +156,8 @@ export default class ScheduleService {
         name,
         schedule,
         command,
+        id: _id,
+        runOrigin,
       });
     }
   }
@@ -154,7 +172,7 @@ export default class ScheduleService {
   }
 
   async createIntervalTask(
-    { id = 0, command, name = '' }: ScheduleTaskType,
+    { id = 0, command, name = '', runOrigin }: ScheduleTaskType,
     schedule: SimpleIntervalSchedule,
     runImmediately = true,
     callbacks?: TaskCallbacks,
@@ -172,6 +190,8 @@ export default class ScheduleService {
         this.runTask(command, callbacks, {
           name,
           command,
+          id: _id,
+          runOrigin,
         });
       },
       (err) => {
@@ -195,6 +215,8 @@ export default class ScheduleService {
       this.runTask(command, callbacks, {
         name,
         command,
+        id: _id,
+        runOrigin,
       });
     }
   }

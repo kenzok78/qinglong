@@ -210,15 +210,15 @@ run_else() {
 
 check_file() {
   isJsOrPythonFile="false"
-  if [[ $1 == *.js ]] || [[ $1 == *.py ]] || [[ $1 == *.pyc ]] || [[ $1 == *.ts ]]; then
+  if [[ $1 == *.js ]] || [[ $1 == *.mjs ]] || [[ $1 == *.py ]] || [[ $1 == *.pyc ]] || [[ $1 == *.ts ]]; then
     isJsOrPythonFile="true"
   fi
   if [[ -f $file_env ]]; then
     get_env_array
     if [[ $isJsOrPythonFile == 'true' ]]; then
-      PREV_NODE_OPTIONS="${NODE_OPTIONS}"
-      PREV_PYTHONPATH="${PYTHONPATH}"
-      if [[ $1 == *.js ]] || [[ $1 == *.ts ]]; then
+      PREV_NODE_OPTIONS="${NODE_OPTIONS:=}"
+      PREV_PYTHONPATH="${PYTHONPATH:=}"
+      if [[ $1 == *.js ]] || [[ $1 == *.ts ]] || [[ $1 == *.mjs ]]; then
         export NODE_OPTIONS="${NODE_OPTIONS} -r ${file_preload_js}"
       else
         export PYTHONPATH="${PYTHONPATH}:${dir_preload}:${dir_config}"
@@ -269,7 +269,14 @@ check_file "${task_shell_params[@]}"
 if [[ $isJsOrPythonFile == 'false' ]]; then
   run_task_before "${task_shell_params[@]}"
 fi
+if set -o | grep -q 'nounset.*on'; then
+  set_u_on="true"
+  set +u
+fi
 main "${task_shell_params[@]}"
+if [[ "$set_u_on" == 'true' ]]; then
+  set -u
+fi
 if [[ $isJsOrPythonFile == 'true' ]]; then
   export NODE_OPTIONS="${PREV_NODE_OPTIONS}"
   export PYTHONPATH="${PREV_PYTHONPATH}"

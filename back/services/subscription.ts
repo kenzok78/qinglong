@@ -29,6 +29,7 @@ import { LOG_END_SYMBOL } from '../config/const';
 import { formatCommand, formatUrl } from '../config/subscription';
 import { CrontabModel } from '../data/cron';
 import CrontabService from './cron';
+import taskLimit from '../shared/pLimit';
 
 @Service()
 export default class SubscriptionService {
@@ -40,8 +41,12 @@ export default class SubscriptionService {
     private crontabService: CrontabService,
   ) {}
 
-  public async list(searchText?: string): Promise<Subscription[]> {
+  public async list(
+    searchText?: string,
+    ids?: string,
+  ): Promise<Subscription[]> {
     let query = {};
+    const subIds = JSON.parse(ids || '[]');
     if (searchText) {
       const reg = {
         [Op.or]: [
@@ -62,7 +67,7 @@ export default class SubscriptionService {
     }
     try {
       const result = await SubscriptionModel.findAll({
-        where: query,
+        where: { ...query, ...(ids ? { id: subIds } : undefined) },
         order: [
           ['is_disabled', 'ASC'],
           ['createdAt', 'DESC'],
@@ -87,7 +92,7 @@ export default class SubscriptionService {
       this.scheduleService.cancelCronTask(doc as any);
       needCreate &&
         (await this.scheduleService.createCronTask(
-          doc as any,
+          { ...doc, runOrigin: 'subscription' } as any,
           this.taskCallbacks(doc),
           runImmediately,
         ));
@@ -96,7 +101,7 @@ export default class SubscriptionService {
       const { type, value } = doc.interval_schedule;
       needCreate &&
         (await this.scheduleService.createIntervalTask(
-          doc as any,
+          { ...doc, runOrigin: 'subscription' } as any,
           { [type]: value } as SimpleIntervalSchedule,
           runImmediately,
           this.taskCallbacks(doc),
@@ -326,6 +331,8 @@ export default class SubscriptionService {
       name: subscription.name,
       schedule: subscription.schedule,
       command,
+      id: String(subscription.id),
+      runOrigin: 'subscription',
     });
   }
 
