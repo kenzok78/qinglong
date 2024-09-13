@@ -1,5 +1,6 @@
 const { execSync } = require('child_process');
 require(`./env.js`);
+
 function expandRange(rangeStr, max) {
   const tempRangeStr = rangeStr
     .trim()
@@ -28,11 +29,12 @@ function run() {
     file_task_before_js,
     dir_scripts,
     task_before,
+    PREV_NODE_OPTIONS
   } = process.env;
 
-  require(file_task_before_js);
-
   try {
+    process.env.NODE_OPTIONS = PREV_NODE_OPTIONS;
+
     const splitStr = '__sitecustomize__';
     const fileName = process.argv[1].replace(`${dir_scripts}/`, '');
     let command = `bash -c "source ${file_task_before} ${fileName}`;
@@ -44,7 +46,7 @@ function run() {
       console.log('执行前置命令\n');
     }
     const res = execSync(
-      `${command} && echo -e '${splitStr}' && NODE_OPTIONS= node -p 'JSON.stringify(process.env)'"`,
+      `${command} && echo -e '${splitStr}' && node -p 'JSON.stringify(process.env)'"`,
       {
         encoding: 'utf-8',
       },
@@ -60,9 +62,18 @@ function run() {
     }
   } catch (error) {
     if (!error.message.includes('spawnSync /bin/sh E2BIG')) {
-      console.log(`run task before error: `, error);
+      console.log(`❌ run task before error: `, error);
+    } else {
+      console.log(
+        `❌ The environment variable is too large. It is recommended to use task_before.js instead of task_before.sh\n`,
+      );
+    }
+    if (task_before) {
+      console.log('执行前置命令结束\n');
     }
   }
+
+  require(file_task_before_js);
 
   if (envParam && numParam) {
     const array = (process.env[envParam] || '').split('&');

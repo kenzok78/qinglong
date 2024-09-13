@@ -20,9 +20,9 @@ Timed task management platform supporting Python3, JavaScript, Shell, Typescript
 [docker-image-size-image]: https://img.shields.io/docker/image-size/whyour/qinglong?style=flat
 [docker-image-size-url]: https://hub.docker.com/r/whyour/qinglong
 
-[Demo](http://demo.dlww.cc:4433/) / [Issues](https://github.com/whyour/qinglong/issues) / [Telegram Channel](https://t.me/jiao_long) / [Buy Me a Coffee](https://www.buymeacoffee.com/qinglong)
+[Demo](http://demo.ninesix.cc:4433/) / [Issues](https://github.com/whyour/qinglong/issues) / [Telegram Channel](https://t.me/jiao_long) / [Buy Me a Coffee](https://www.buymeacoffee.com/qinglong)
 
-[演示](http://demo.dlww.cc:4433/) / [反馈](https://github.com/whyour/qinglong/issues) / [Telegram 频道](https://t.me/jiao_long) / [打赏开发者](https://user-images.githubusercontent.com/22700758/244744295-29cd0cd1-c8bb-4ea1-adf6-29bd390ad4dd.jpg)
+[演示](http://demo.ninesix.cc:4433/) / [反馈](https://github.com/whyour/qinglong/issues) / [Telegram 频道](https://t.me/jiao_long) / [打赏开发者](https://user-images.githubusercontent.com/22700758/244744295-29cd0cd1-c8bb-4ea1-adf6-29bd390ad4dd.jpg)
 </div>
 
 ![cover](https://user-images.githubusercontent.com/22700758/244847235-8dc1ca21-e03f-4606-9458-0541fab60413.png)
@@ -76,6 +76,14 @@ docker run -dit \
   whyour/qinglong:latest
 ```
 
+### 宝塔面板一键部署（推荐）
+
+1. 安装宝塔面板，前往 [宝塔面板](https://www.bt.cn/u/EcDAFU) 官网，选择正式版的脚本下载安装
+
+2. 安装后登录宝塔面板，在菜单栏中点击 `Docker`，首次进入会提示安装`Docker`服务，点击立即安装，按提示完成安装
+
+3. 安装完成后在应用商店中找到`青龙面板`，点击安装，配置域名等基本信息即可完成安装
+
 ### docker-compose (推荐)
 
 ```bash
@@ -107,7 +115,7 @@ podman run -dit \
   docker.io/whyour/qinglong:latest
 ```
 
-### npm
+### npm (本地)
 
 建议使用纯净系统安装，避免系统原有数据丢失，需要自己安装 node/npm/python3/pip3/pnpm
 

@@ -18,9 +18,9 @@ Timed task management platform supporting Python3, JavaScript, Shell, Typescript
 [docker-image-size-image]: https://img.shields.io/docker/image-size/whyour/qinglong?style=flat
 [docker-image-size-url]: https://hub.docker.com/r/whyour/qinglong
 
-[Demo](http://demo.dlww.cc:4433/) / [Issues](https://github.com/whyour/qinglong/issues) / [Telegram Channel](https://t.me/jiao_long) / [Buy Me a Coffee](https://www.buymeacoffee.com/qinglong)
+[Demo](http://demo.ninesix.cc:4433/) / [Issues](https://github.com/whyour/qinglong/issues) / [Telegram Channel](https://t.me/jiao_long) / [Buy Me a Coffee](https://www.buymeacoffee.com/qinglong)
 
-[演示](http://demo.dlww.cc:4433/) / [反馈](https://github.com/whyour/qinglong/issues) / [Telegram 频道](https://t.me/jiao_long) / [打赏开发者](https://user-images.githubusercontent.com/22700758/244744295-29cd0cd1-c8bb-4ea1-adf6-29bd390ad4dd.jpg)
+[演示](http://demo.ninesix.cc:4433/) / [反馈](https://github.com/whyour/qinglong/issues) / [Telegram 频道](https://t.me/jiao_long) / [打赏开发者](https://user-images.githubusercontent.com/22700758/244744295-29cd0cd1-c8bb-4ea1-adf6-29bd390ad4dd.jpg)
 </div>
 
 ![cover](https://user-images.githubusercontent.com/22700758/244847235-8dc1ca21-e03f-4606-9458-0541fab60413.png)
@@ -74,6 +74,14 @@ docker run -dit \
   whyour/qinglong:latest
 ```
 
+### BaoTa Panel one-click deployment (Recommended)
+
+1. To install Pagoda Panel, go to the official website of [BaoTa Panel](https://www.bt.cn/u/EcDAFU), select the official version of the script to download and install.
+
+2. After installation, login to Pagoda Panel, click `Docker` in the menu bar, the first time you enter, you will be prompted to install `Docker` service, click Install Now, follow the prompts to complete the installation.
+
+3. After the installation is complete, find `Qinglong Panel` in the app shop, click Install, configure the domain name and other basic information to complete the installation.
+
 ### Docker-compose (Recommended)
 
 ```bash
@@ -105,7 +113,7 @@ podman run -dit \
   docker.io/whyour/qinglong:latest
 ```
 
-### Npm
+### Npm (Local)
 
 It is recommended to use a pure system installation to avoid losing the original system data, you need to install node/npm/python3/pip3/pnpm yourself
 

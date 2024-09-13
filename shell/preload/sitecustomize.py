@@ -35,9 +35,10 @@ def expand_range(range_str, max_value):
 
 
 def run():
-    import task_before
-
     try:
+        prev_pythonpath = os.getenv("PREV_PYTHONPATH", "")
+        os.environ["PYTHONPATH"] = prev_pythonpath
+
         split_str = "__sitecustomize__"
         file_name = sys.argv[0].replace(f"{os.getenv('dir_scripts')}/", "")
         command = f'bash -c "source {os.getenv("file_task_before")} {file_name}'
@@ -48,7 +49,10 @@ def run():
             command += f" && eval '{escape_task_before}'"
             print("执行前置命令\n")
 
-        python_command = "PYTHONPATH= python3 -c 'import os, json; print(json.dumps(dict(os.environ)))'"
+        prev_pythonpath = os.getenv("PREV_PYTHONPATH", "")
+        python_command = (
+            "python3 -c 'import os, json; print(json.dumps(dict(os.environ)))'"
+        )
         command += f" && echo -e '{split_str}' && {python_command}\""
 
         res = subprocess.check_output(command, shell=True, encoding="utf-8")
@@ -68,9 +72,17 @@ def run():
     except OSError as error:
         error_message = str(error)
         if "Argument list too long" not in error_message:
-            print(f"run task before error: {error}")
+            print(f"❌ run task before error: {error}")
+        else:
+            print(
+                "❌ The environment variable is too large. It is recommended to use task_before.py instead of task_before.sh\n"
+            )
+        if task_before:
+            print("执行前置命令结束")
     except Exception as error:
         print(f"run task before error: {error}")
+
+    import task_before
 
     env_param = os.getenv("envParam")
     num_param = os.getenv("numParam")
