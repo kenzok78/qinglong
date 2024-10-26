@@ -95,6 +95,10 @@ const push_config = {
   WEBHOOK_HEADERS: '', // 自定义通知 请求头
   WEBHOOK_METHOD: '', // 自定义通知 请求方法
   WEBHOOK_CONTENT_TYPE: '', // 自定义通知 content-type
+
+  NTFY_URL: '', // ntfy地址,如https://ntfy.sh,默认为https://ntfy.sh
+  NTFY_TOPIC: '', // ntfy的消息应用topic
+  NTFY_PRIORITY: '3', // 推送消息优先级,默认为3
 };
 
 for (const key in push_config) {
@@ -224,11 +228,13 @@ function serverNotify(text, desp) {
     if (PUSH_KEY) {
       // 微信server酱推送通知一个\n不会换行，需要两个\n才能换行，故做此替换
       desp = desp.replace(/[\n\r]/g, '\n\n');
+
+      const matchResult = PUSH_KEY.match(/^sctp(\d+)t/i);
       const options = {
-        url: PUSH_KEY.includes('SCT')
-          ? `https://sctapi.ftqq.com/${PUSH_KEY}.send`
-          : `https://sc.ftqq.com/${PUSH_KEY}.send`,
-        body: `text=${text}&desp=${desp}`,
+        url: matchResult && matchResult[1]
+        ? `https://${matchResult[1]}.push.ft07.com/send/${PUSH_KEY}.send`
+        : `https://sctapi.ftqq.com/${PUSH_KEY}.send`,
+        body: `text=${encodeURIComponent(text)}&desp=${encodeURIComponent(desp)}`,
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
@@ -1188,6 +1194,48 @@ function webhookNotify(text, desp) {
   });
 }
 
+function ntfyNotify(text, desp) {
+  function encodeRFC2047(text) {
+    const encodedBase64 = Buffer.from(text).toString('base64');
+    return `=?utf-8?B?${encodedBase64}?=`;
+  }
+
+  return new Promise((resolve) => {
+    const { NTFY_URL, NTFY_TOPIC, NTFY_PRIORITY } = push_config;
+    if (NTFY_TOPIC) {
+      const options = {
+        url: `${NTFY_URL || 'https://ntfy.sh'}/${NTFY_TOPIC}`,
+        body: `${desp}`, 
+        headers: {
+          'Title': `${encodeRFC2047(text)}`,
+          'Priority': NTFY_PRIORITY || '3'
+        },
+        timeout,
+      };
+      $.post(options, (err, resp, data) => {
+        try {
+          if (err) {
+            console.log('Ntfy 通知调用API失败😞\n', err);
+          } else {
+            if (data.id) {
+              console.log('Ntfy 发送通知消息成功🎉\n');
+            } else {
+              console.log(`Ntfy 发送通知消息异常 ${JSON.stringify(data)}`);
+            }
+          }
+        } catch (e) {
+          $.logErr(e, resp);
+        } finally {
+          resolve(data);
+        }
+      });
+    } else {
+      resolve();
+    }
+  });
+}
+
+
 function parseString(input, valueFormatFn) {
   const regex = /(\w+):\s*((?:(?!\n\w+:).)*)/g;
   const matches = {};
@@ -1316,6 +1364,7 @@ async function sendNotify(text, desp, params = {}) {
     chronocatNotify(text, desp), // Chronocat
     webhookNotify(text, desp), // 自定义通知
     qmsgNotify(text, desp), // 自定义通知
+    ntfyNotify(text, desp), // Ntfy
   ]);
 }
 

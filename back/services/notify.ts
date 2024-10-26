@@ -35,6 +35,7 @@ export default class NotificationService {
     ['webhook', this.webhook],
     ['lark', this.lark],
     ['chronocat', this.chronocat],
+    ['ntfy', this.ntfy],
   ]);
 
   private title = '';
@@ -151,14 +152,16 @@ export default class NotificationService {
 
   private async serverChan() {
     const { serverChanKey } = this.params;
-    const url = serverChanKey.startsWith('SCT')
-      ? `https://sctapi.ftqq.com/${serverChanKey}.send`
-      : `https://sc.ftqq.com/${serverChanKey}.send`;
+    const matchResult = serverChanKey.match(/^sctp(\d+)t/i);
+    const url = matchResult && matchResult[1]
+      ? `https://${matchResult[1]}.push.ft07.com/send/${serverChanKey}.send`
+      : `https://sctapi.ftqq.com/${serverChanKey}.send`;
+
     try {
       const res: any = await got
         .post(url, {
           ...this.gotOption,
-          body: `title=${this.title}&desp=${this.content}`,
+          body: `title=${encodeURIComponent(this.title)}&desp=${encodeURIComponent(this.content)}`,
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         })
         .json();
@@ -516,7 +519,7 @@ export default class NotificationService {
     } catch (error: any) {
       throw new Error(error.response ? error.response.body : error);
     }
-  }
+ }
 
   private async pushPlus() {
     const { pushPlusToken, pushPlusUser } = this.params;
@@ -661,6 +664,32 @@ export default class NotificationService {
     }
   }
 
+  private async ntfy() {
+    const { ntfyUrl, ntfyTopic, ntfyPriority } = this.params;
+    // 编码函数
+    const encodeRfc2047 = (text: string, charset: string = 'UTF-8'): string => {
+      const encodedText = Buffer.from(text).toString('base64');
+      return `=?${charset}?B?${encodedText}?=`;
+  };
+    try {
+        const encodedTitle = encodeRfc2047(this.title);
+        const res: any = await got
+          .post(`${ntfyUrl || 'https://ntfy.sh'}/${ntfyTopic}`, {
+              ...this.gotOption,
+              body: `${this.content}`,
+              headers: { 'Title': encodedTitle, 'Priority': `${ntfyPriority || '3'}` },
+          });
+          if (res.statusCode === 200) {
+            return true;
+          } else {
+            throw new Error(JSON.stringify(res));
+          }
+    } catch (error: any) {
+        throw new Error(error.response ? error.response.body : error);
+    }
+  }
+
+  
   private async chronocat() {
     const { chronocatURL, chronocatQQ, chronocatToken } = this.params;
     try {
