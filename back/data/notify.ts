@@ -21,6 +21,7 @@ export enum NotificationMode {
   'webhook' = 'webhook',
   'chronocat' = 'Chronocat',
   'ntfy' = 'ntfy',
+  'wxPusherBot' = 'wxPusherBot',
 }
 
 abstract class NotificationBaseInfo {
@@ -100,6 +101,11 @@ export class IGotNotification extends NotificationBaseInfo {
 export class PushPlusNotification extends NotificationBaseInfo {
   public pushPlusToken = '';
   public pushPlusUser = '';
+  public pushPlusTemplate = '';
+  public pushplusChannel = '';
+  public pushplusWebhook = '';
+  public pushplusCallbackUrl = '';
+  public pushplusTo = '';
 }
 
 export class WePlusBotNotification extends NotificationBaseInfo {
@@ -145,6 +151,13 @@ export class NtfyNotification extends NotificationBaseInfo {
   public ntfyTopic = '';
   public ntfyPriority = '';
 }
+
+export class WxPusherBotNotification extends NotificationBaseInfo {
+  public wxPusherBotAppToken = '';
+  public wxPusherBotTopicIds = '';
+  public wxPusherBotUids = '';
+}
+
 export interface NotificationInfo
   extends GoCqHttpBotNotification,
     GotifyNotification,
@@ -165,5 +178,5 @@ export interface NotificationInfo
     WebhookNotification,
     ChronocatNotification,
     LarkNotification,
-    NtfyNotification {}
-
+    NtfyNotification,
+    WxPusherBotNotification {}
