@@ -193,12 +193,6 @@ fix_config() {
     echo
   fi
 
-  if [[ ! -s $file_auth_user ]]; then
-    echo -e "复制一份 $file_auth_sample 为 $file_auth_user\n"
-    cp -fv $file_auth_sample $file_auth_user
-    echo
-  fi
-
   if [[ ! -s $file_notify_py ]]; then
     echo -e "复制一份 $file_notify_py_sample 为 $file_notify_py\n"
     cp -fv $file_notify_py_sample $file_notify_py
@@ -473,10 +467,12 @@ handle_task_end() {
   local end_time=$(format_time "$time_format" "$etime")
   local end_timestamp=$(format_timestamp "$time_format" "$etime")
   local diff_time=$(($end_timestamp - $begin_timestamp))
+  local suffix=""
+  [[ "$MANUAL" == "true" ]] && suffix="(手动停止)"
 
   [[ "$diff_time" == 0 ]] && diff_time=1
 
-  echo -e "\n## 执行结束... $end_time  耗时 $diff_time 秒　　　　　"
+  echo -e "\n## 执行结束$suffix... $end_time  耗时 $diff_time 秒　　　　　"
   [[ $ID ]] && update_cron "\"$ID\"" "1" "" "$log_path" "$begin_timestamp" "$diff_time"
 }
 
