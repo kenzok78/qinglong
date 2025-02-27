@@ -182,11 +182,10 @@ export default class NotificationService {
   }
 
   private async chat() {
-    const { chatUrl, chatToken } = this.params;
-    const url = `${chatUrl}${chatToken}`;
+    const { synologyChatUrl } = this.params;
     try {
       const res: any = await got
-        .post(url, {
+        .post(synologyChatUrl, {
           ...this.gotOption,
           body: `payload={"text":"${this.title}\n${this.content}"}`,
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -802,7 +801,7 @@ export default class NotificationService {
       webhookContentType,
     } = this.params;
 
-    if (!webhookUrl.includes('$title') && !webhookBody.includes('$title')) {
+    if (!webhookUrl?.includes('$title') && !webhookBody?.includes('$title')) {
       throw new Error('Url 或者 Body 中必须包含 $title');
     }
 

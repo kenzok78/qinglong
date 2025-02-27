@@ -543,6 +543,9 @@ main() {
   resettfa)
     eval update_auth_config "\\\"twoFactorActivated\\\":false" "禁用两步验证" $cmd
     ;;
+  resetpwd)
+    eval update_auth_config "\\\"password\\\":\\\"$p2\\\"" "重置密码" $cmd
+    ;;
   *)
     eval echo -e "命令输入错误...\\\n" $cmd
     eval usage $cmd
@@ -553,7 +556,7 @@ main() {
   local end_time=$(format_time "$time_format" "$etime")
   local end_timestamp=$(format_timestamp "$time_format" "$etime")
   local diff_time=$(($end_timestamp - $begin_timestamp))
-  [[ $ID ]] && update_cron "\"$ID\"" "1" "" "$log_path" "$begin_timestamp" "$diff_time"
+  [[ $ID ]] && update_cron "\"$ID\"" "1" "$$" "$log_path" "$begin_timestamp" "$diff_time"
 
   if [[ "$p1" != "repo" ]] && [[ "$p1" != "raw" ]]; then
     eval echo -e "\\\n\#\# 执行结束... $end_time  耗时 $diff_time 秒　　　　　" $cmd

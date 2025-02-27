@@ -186,6 +186,7 @@
   "秒后重试": "Retry after seconds",
   "在您的设备上打开两步验证应用程序以查看您的身份验证代码并验证您的身份。": "Open the two-factor authentication application on your device to view your authentication code and verify your identity.",
   "请选择脚本文件": "Please select a script file",
+  "当前文件不支持预览": "The current file does not support preview",
   "清空日志": "Clear Logs",
   "设置": "Settings",
   "退出": "Exit",
@@ -344,7 +345,7 @@
   "gotify的url地址，例如 https://push.example.de:8080": "gotify URL address, e.g., https://push.example.de:8080",
   "gotify的消息应用token码": "gotify message application token code",
   "推送消息的优先级": "Priority of Push Messages",
-  "chat的url地址": "Chat URL address",
+  "synologyChat的url地址": "Synology Chat Webhook URL address",
   "chat的token码": "Chat token code",
   "推送到个人QQ: http://127.0.0.1/send_private_msg，群：http://127.0.0.1/send_group_msg": "Push to personal QQ: http://127.0.0.1/send_private_msg, group: http://127.0.0.1/send_group_msg",
   "访问密钥": "Access Key",
@@ -496,5 +497,9 @@
   "NPM 镜像源": "NPM Mirror Source",
   "PyPI 镜像源": "PyPI Mirror Source",
   "alpine linux 镜像源": "Alpine Linux Mirror Source",
-  "如果恢复失败，可进入容器执行": "If recovery fails, you can enter the container and execute"
+  "如果恢复失败，可进入容器执行": "If recovery fails, you can enter the container and execute",
+  "常规定时": "Normal Timing",
+  "手动运行": "Manual Run",
+  "开机运行": "Boot Run",
+  "时区": "Timezone"
 }
