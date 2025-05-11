@@ -4,13 +4,14 @@ import got from 'got';
 import iconv from 'iconv-lite';
 import { exec } from 'child_process';
 import FormData from 'form-data';
-import psTreeFun from 'pstree.remy';
+import psTreeFun from 'ps-tree';
 import { promisify } from 'util';
 import { load } from 'js-yaml';
 import config from './index';
-import { TASK_COMMAND } from './const';
+import { PYTHON_INSTALL_DIR, TASK_COMMAND } from './const';
 import Logger from '../loaders/logger';
 import { writeFileWithLock } from '../shared/utils';
+import { DependenceTypes } from '../data/dependence';
 
 export * from './share';
 
@@ -305,23 +306,51 @@ export async function readDir(
   dir: string,
   baseDir: string = '',
   blacklist: string[] = [],
-) {
-  const relativePath = path.relative(baseDir, dir);
-  const files = await fs.readdir(dir);
-  const result: any = files
-    .filter((x) => !blacklist.includes(x))
-    .map(async (file: string) => {
-      const subPath = path.join(dir, file);
+): Promise<IFile[]> {
+  const absoluteDir = path.join(baseDir, dir);
+  const relativePath = path.relative(baseDir, absoluteDir);
+
+  try {
+    const files = await fs.readdir(absoluteDir);
+    const result: IFile[] = [];
+
+    for (const file of files) {
+      const subPath = path.join(absoluteDir, file);
       const stats = await fs.lstat(subPath);
       const key = path.join(relativePath, file);
-      return {
-        title: file,
-        type: stats.isDirectory() ? 'directory' : 'file',
-        key,
-        parent: relativePath,
-      };
-    });
-  return result;
+
+      if (blacklist.includes(file) || stats.isSymbolicLink()) {
+        continue;
+      }
+
+      if (stats.isDirectory()) {
+        result.push({
+          title: file,
+          type: 'directory',
+          key,
+          parent: relativePath,
+          createTime: stats.birthtime.getTime(),
+          children: [],
+        });
+      } else {
+        result.push({
+          title: file,
+          type: 'file',
+          key,
+          parent: relativePath,
+          size: stats.size,
+          createTime: stats.birthtime.getTime(),
+        });
+      }
+    }
+
+    return result;
+  } catch (error: any) {
+    if (error.code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
 }
 
 export async function promiseExec(command: string): Promise<string> {
@@ -352,9 +381,9 @@ export function parseHeaders(headers: string) {
   if (!headers) return {};
 
   const parsed: any = {};
-  let key;
-  let val;
-  let i;
+  let key: string;
+  let val: string;
+  let i: number;
 
   headers &&
     headers.split('\n').forEach(function parser(line) {
@@ -433,11 +462,11 @@ export function parseBody(
 
 export function psTree(pid: number): Promise<number[]> {
   return new Promise((resolve, reject) => {
-    psTreeFun(pid, (err: any, pids: number[]) => {
+    psTreeFun(pid, (err: any, children) => {
       if (err) {
         reject(err);
       }
-      resolve(pids.filter((x) => !isNaN(x)));
+      resolve(children.map((x) => Number(x.PID)).filter((x) => !isNaN(x)));
     });
   });
 }
@@ -557,4 +586,39 @@ export async function setSystemTimezone(timezone: string): Promise<boolean> {
     Logger.error('[setSystemTimezone失败]', error);
     return false;
   }
+}
+
+export function getInstallCommand(type: DependenceTypes, name: string): string {
+  const baseCommands = {
+    [DependenceTypes.nodejs]: 'pnpm add -g',
+    [DependenceTypes.python3]:
+      'pip3 install --disable-pip-version-check --root-user-action=ignore',
+    [DependenceTypes.linux]: 'apk add --no-check-certificate',
+  };
+
+  let command = baseCommands[type];
+
+  if (type === DependenceTypes.python3 && PYTHON_INSTALL_DIR) {
+    command = `${command} --prefix=${PYTHON_INSTALL_DIR}`;
+  }
+
+  return `${command} ${name.trim()}`;
+}
+
+export function getUninstallCommand(
+  type: DependenceTypes,
+  name: string,
+): string {
+  const baseCommands = {
+    [DependenceTypes.nodejs]: 'pnpm remove -g',
+    [DependenceTypes.python3]:
+      'pip3 uninstall --disable-pip-version-check --root-user-action=ignore -y',
+    [DependenceTypes.linux]: 'apk del',
+  };
+
+  return `${baseCommands[type]} ${name.trim()}`;
+}
+
+export function isDemoEnv() {
+  return process.env.DeployEnv === 'demo';
 }
