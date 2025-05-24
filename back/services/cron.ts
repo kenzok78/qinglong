@@ -215,14 +215,24 @@ export default class CronService {
             operate2 = Op.and;
             break;
           case 'In':
-            q[Op.or] = [
-              {
-                [property]: Array.isArray(value) ? value : [value],
-              },
-              property === 'status' && value.includes(2)
-                ? { isDisabled: 1 }
-                : {},
-            ];
+            if (
+              property === 'status' &&
+              !value.includes(CrontabStatus.disabled)
+            ) {
+              q[Op.and] = [
+                { [property]: Array.isArray(value) ? value : [value] },
+                { isDisabled: 0 },
+              ];
+            } else {
+              q[Op.or] = [
+                {
+                  [property]: Array.isArray(value) ? value : [value],
+                },
+                property === 'status' && value.includes(CrontabStatus.disabled)
+                  ? { isDisabled: 1 }
+                  : {},
+              ];
+            }
             break;
           case 'Nin':
             q[Op.and] = [
@@ -560,7 +570,10 @@ export default class CronService {
     if (logFileExist) {
       return await getFileContentByName(`${absolutePath}`);
     } else {
-      return '任务未运行';
+      return typeof doc.status === 'number' &&
+        [CrontabStatus.queued, CrontabStatus.running].includes(doc.status)
+        ? '运行中...'
+        : '任务空闲中';
     }
   }
 
@@ -694,6 +707,7 @@ export default class CronService {
       }));
 
     if (isDemoEnv()) {
+      await writeFileWithLock(config.crontabFile, '');
       return;
     }
     await cronClient.addCron(regularCrons);

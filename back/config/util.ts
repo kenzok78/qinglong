@@ -514,6 +514,27 @@ export async function setSystemTimezone(timezone: string): Promise<boolean> {
   }
 }
 
+export function getGetCommand(type: DependenceTypes, name: string): string {
+  const baseCommands = {
+    [DependenceTypes.nodejs]: `pnpm ls -g  | grep "${name}" | head -1`,
+    [DependenceTypes.python3]: `
+    python3 -c "exec('''
+name='${name}'
+try:
+    from importlib.metadata import version
+    print(version(name))
+except:
+    import importlib.util as u
+    import importlib.metadata as m
+    spec=u.find_spec(name)
+    print(name if spec else '')
+''')"`,
+    [DependenceTypes.linux]: `apk info -es ${name}`,
+  };
+
+  return baseCommands[type];
+}
+
 export function getInstallCommand(type: DependenceTypes, name: string): string {
   const baseCommands = {
     [DependenceTypes.nodejs]: 'pnpm add -g',
