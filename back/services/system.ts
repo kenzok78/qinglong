@@ -7,7 +7,7 @@ import path from 'path';
 import { Inject, Service } from 'typedi';
 import winston from 'winston';
 import config from '../config';
-import { TASK_COMMAND } from '../config/const';
+import { NotificationModeStringMap, TASK_COMMAND } from '../config/const';
 import {
   getPid,
   killTask,
@@ -373,8 +373,27 @@ export default class SystemService {
     return { code: 200 };
   }
 
-  public async notify({ title, content }: { title: string; content: string }) {
-    const isSuccess = await this.notificationService.notify(title, content);
+  public async notify({
+    title,
+    content,
+    notificationInfo,
+  }: {
+    title: string;
+    content: string;
+    notificationInfo?: NotificationInfo;
+  }) {
+    const typeString =
+      typeof notificationInfo?.type === 'number'
+        ? NotificationModeStringMap[notificationInfo.type]
+        : undefined;
+    if (notificationInfo && typeString) {
+      notificationInfo.type = typeString;
+    }
+    const isSuccess = await this.notificationService.notify(
+      title,
+      content,
+      notificationInfo,
+    );
     if (isSuccess) {
       return { code: 200, message: '通知发送成功' };
     } else {
@@ -415,10 +434,17 @@ export default class SystemService {
     }
   }
 
-  public async exportData(res: Response) {
+  public async exportData(res: Response, type?: string[]) {
     try {
+      let dataDirs = ['db', 'upload'];
+      if (type && type.length) {
+        dataDirs = dataDirs.concat(type.filter((x) => x !== 'base'));
+      }
+      const dataPaths = dataDirs.map((dir) => `data/${dir}`);
       await promiseExec(
-        `cd ${config.dataPath} && cd ../ && tar -zcvf ${config.dataTgzFile} data/`,
+        `cd ${config.dataPath} && cd ../ && tar -zcvf ${
+          config.dataTgzFile
+        } ${dataPaths.join(' ')}`,
       );
       res.download(config.dataTgzFile);
     } catch (error: any) {
@@ -502,5 +528,16 @@ export default class SystemService {
     } else {
       return { code: 400, message: '设置时区失败' };
     }
+  }
+
+  public async cleanDependence(type: 'node' | 'python3') {
+    if (!type || !['node', 'python3'].includes(type)) {
+      return { code: 400, message: '参数错误' };
+    }
+    try {
+      const finalPath = path.join(config.dependenceCachePath, type);
+      await fs.promises.rm(finalPath, { recursive: true });
+    } catch (error) {}
+    return { code: 200 };
   }
 }
