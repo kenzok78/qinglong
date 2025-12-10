@@ -29,7 +29,7 @@ interface Config {
 }
 
 const config: Config = {
-  port: parseInt(process.env.BACK_PORT || '5600', 10),
+  port: parseInt(process.env.BACK_PORT || '5700', 10),
   grpcPort: parseInt(process.env.GRPC_PORT || '5500', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   isDevelopment: process.env.NODE_ENV === 'development',
@@ -176,4 +176,5 @@ export default {
   sshdPath,
   systemLogPath,
   dependenceCachePath,
+  maxTokensPerPlatform: 10, // Maximum number of concurrent sessions per platform
 };

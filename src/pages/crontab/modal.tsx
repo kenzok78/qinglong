@@ -3,7 +3,7 @@ import config from '@/utils/config';
 import { request } from '@/utils/http';
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
 import { Button, Form, Input, Modal, Select, Space, message } from 'antd';
-import cronParse from 'cron-parser';
+import { CronExpressionParser } from 'cron-parser';
 import { useEffect, useState } from 'react';
 import intl from 'react-intl-universal';
 import { getScheduleType, scheduleTypeMap } from './const';
@@ -91,7 +91,7 @@ const CronModal = ({
             { required: true },
             {
               validator: (_, value) => {
-                if (!value || cronParse.parseExpression(value).hasNext()) {
+                if (!value || CronExpressionParser.parse(value).hasNext()) {
                   return Promise.resolve();
                 }
                 return Promise.reject(intl.get('Cron表达式格式有误'));
@@ -179,6 +179,51 @@ const CronModal = ({
         {renderScheduleFields()}
         <Form.Item name="labels" label={intl.get('标签')}>
           <EditableTagGroup />
+        </Form.Item>
+        <Form.Item
+          name="allow_multiple_instances"
+          label={intl.get('实例模式')}
+          tooltip={intl.get(
+            '单实例模式：定时启动新任务前会自动停止旧任务；多实例模式：允许同时运行多个任务实例',
+          )}
+        >
+          <Select placeholder={intl.get('请选择实例模式')}>
+            <Select.Option value={0}>{intl.get('单实例')}</Select.Option>
+            <Select.Option value={1}>{intl.get('多实例')}</Select.Option>
+          </Select>
+        </Form.Item>
+        <Form.Item
+          name="log_name"
+          label={intl.get('日志名称')}
+          tooltip={intl.get(
+            '自定义日志文件夹名称，用于区分不同任务的日志，留空则自动生成。支持 /dev/null 丢弃日志，其他绝对路径必须在日志目录内',
+          )}
+          rules={[
+            {
+              validator: (_, value) => {
+                if (!value) return Promise.resolve();
+                if (value === '/dev/null') return Promise.resolve();
+                if (value.length > 100) {
+                  return Promise.reject(intl.get('日志名称不能超过100个字符'));
+                }
+                if (
+                  !/^(?!.*(?:^|\/)\.{1,2}(?:\/|$))(?:\/)?(?:[\w.-]+\/)*[\w.-]+\/?$/.test(
+                    value,
+                  )
+                ) {
+                  return Promise.reject(
+                    intl.get('日志名称只能包含字母、数字、下划线和连字符'),
+                  );
+                }
+                return Promise.resolve();
+              },
+            },
+          ]}
+        >
+          <Input
+            placeholder={intl.get('请输入自定义日志文件夹名称或 /dev/null')}
+            maxLength={200}
+          />
         </Form.Item>
         <Form.Item
           name="task_before"
@@ -312,4 +357,3 @@ const CronLabelModal = ({
 };
 
 export { CronLabelModal, CronModal as default };
-

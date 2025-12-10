@@ -4,11 +4,12 @@ import config from '../config';
 import { Crontab, CrontabModel, CrontabStatus } from '../data/cron';
 import { exec, execSync } from 'child_process';
 import fs from 'fs/promises';
-import cron_parser from 'cron-parser';
+import { CronExpressionParser } from 'cron-parser';
 import {
   getFileContentByName,
   fileExist,
   killTask,
+  killAllTasks,
   getUniqPath,
   safeJSONParse,
   isDemoEnv,
@@ -24,6 +25,7 @@ import pickBy from 'lodash/pickBy';
 import omit from 'lodash/omit';
 import { writeFileWithLock } from '../shared/utils';
 import { ScheduleType } from '../interface/schedule';
+import { logStreamManager } from '../shared/logStreamManager';
 
 @Service()
 export default class CronService {
@@ -49,9 +51,29 @@ export default class CronService {
     return this.isOnceSchedule(schedule) || this.isBootSchedule(schedule);
   }
 
+  private async getLogName(cron: Crontab) {
+    const { log_name, command, id } = cron;
+    if (log_name === '/dev/null') {
+      return log_name;
+    }
+    let uniqPath = await getUniqPath(command, `${id}`);
+    if (log_name) {
+      const normalizedLogName = log_name.startsWith('/')
+        ? log_name
+        : path.join(config.logPath, log_name);
+      if (normalizedLogName.startsWith(config.logPath)) {
+        uniqPath = log_name;
+      }
+    }
+    const logDirPath = path.resolve(config.logPath, `${uniqPath}`);
+    await fs.mkdir(logDirPath, { recursive: true });
+    return uniqPath;
+  }
+
   public async create(payload: Crontab): Promise<Crontab> {
     const tab = new Crontab(payload);
     tab.saved = false;
+    tab.log_name = await this.getLogName(tab);
     const doc = await this.insert(tab);
 
     if (isDemoEnv()) {
@@ -82,6 +104,7 @@ export default class CronService {
     const doc = await this.getDb({ id: payload.id });
     const tab = new Crontab({ ...doc, ...payload });
     tab.saved = false;
+    tab.log_name = await this.getLogName(tab);
     const newDoc = await this.updateDb(tab);
 
     if (doc.isDisabled === 1 || isDemoEnv()) {
@@ -442,12 +465,17 @@ export default class CronService {
   public async stop(ids: number[]) {
     const docs = await CrontabModel.findAll({ where: { id: ids } });
     for (const doc of docs) {
-      if (doc.pid) {
-        try {
-          await killTask(doc.pid);
-        } catch (error) {
-          this.logger.error(error);
-        }
+      // Kill all running instances of this task
+      try {
+        const command = this.makeCommand(doc);
+        await killAllTasks(command);
+        this.logger.info(
+          `[panel][停止所有运行中的任务实例] 任务ID: ${doc.id}, 命令: ${command}`,
+        );
+      } catch (error) {
+        this.logger.error(
+          `[panel][停止任务失败] 任务ID: ${doc.id}, 错误: ${error}`,
+        );
       }
     }
 
@@ -476,13 +504,15 @@ export default class CronService {
           `[panel][开始执行任务] 参数: ${JSON.stringify(params)}`,
         );
 
-        let { id, command, log_path } = cron;
-        const uniqPath = await getUniqPath(command, `${id}`);
+        let { id, command, log_name } = cron;
+
+        const uniqPath =
+          log_name === '/dev/null' || !log_name
+            ? await getUniqPath(command, `${id}`)
+            : log_name;
         const logTime = dayjs().format('YYYY-MM-DD-HH-mm-ss-SSS');
         const logDirPath = path.resolve(config.logPath, `${uniqPath}`);
-        if (log_path?.split('/')?.every((x) => x !== uniqPath)) {
-          await fs.mkdir(logDirPath, { recursive: true });
-        }
+        await fs.mkdir(logDirPath, { recursive: true });
         const logPath = `${uniqPath}/${logTime}.log`;
         const absolutePath = path.resolve(config.logPath, `${logPath}`);
         const cp = spawn(
@@ -498,7 +528,7 @@ export default class CronService {
           { where: { id } },
         );
         cp.stdout.on('data', async (data) => {
-          await fs.appendFile(absolutePath, data.toString());
+          await logStreamManager.write(absolutePath, data.toString());
         });
         cp.stderr.on('data', async (data) => {
           this.logger.info(
@@ -506,7 +536,7 @@ export default class CronService {
             command,
             data.toString(),
           );
-          await fs.appendFile(absolutePath, data.toString());
+          await logStreamManager.write(absolutePath, data.toString());
         });
         cp.on('error', async (err) => {
           this.logger.error(
@@ -514,7 +544,7 @@ export default class CronService {
             command,
             err,
           );
-          await fs.appendFile(absolutePath, JSON.stringify(err));
+          await logStreamManager.write(absolutePath, JSON.stringify(err));
         });
 
         cp.on('exit', async (code) => {
@@ -523,6 +553,8 @@ export default class CronService {
             JSON.stringify(params),
             code,
           );
+          // Close the stream after task completion
+          await logStreamManager.closeStream(absolutePath);
           await CrontabModel.update(
             { status: CrontabStatus.idle, pid: undefined },
             { where: { id } },
@@ -564,7 +596,9 @@ export default class CronService {
     if (!doc) {
       return '';
     }
-
+    if (doc.log_name === '/dev/null') {
+      return '日志设置为忽略';
+    }
     const absolutePath = path.resolve(config.logPath, `${doc.log_path}`);
     const logFileExist = doc.log_path && (await fileExist(absolutePath));
     if (logFileExist) {
@@ -593,7 +627,7 @@ export default class CronService {
           files.map(async (x) => ({
             filename: x,
             directory: relativeDir.replace(config.logPath, ''),
-            time: (await fs.lstat(`${dir}/${x}`)).mtime.getTime(),
+            time: (await fs.lstat(`${dir}/${x}`)).birthtimeMs,
           })),
         )
       ).sort((a, b) => b.time - a.time);
@@ -607,9 +641,11 @@ export default class CronService {
     if (!command.startsWith(TASK_PREFIX) && !command.startsWith(QL_PREFIX)) {
       command = `${TASK_PREFIX}${tab.command}`;
     }
-    let commandVariable = `real_time=${Boolean(realTime)} no_tee=true ID=${
-      tab.id
-    } `;
+    let commandVariable = `real_time=${Boolean(realTime)} no_tee=true ID=${tab.id} `;
+    // Only include log_name if it has a truthy value to avoid passing null/undefined to shell
+    if (tab.log_name) {
+      commandVariable += `log_name=${tab.log_name} `;
+    }
     if (tab.task_before) {
       commandVariable += `task_before='${tab.task_before
         .replace(/'/g, "'\\''")
@@ -651,12 +687,23 @@ export default class CronService {
 
     await writeFileWithLock(config.crontabFile, crontab_string);
 
-    execSync(`crontab ${config.crontabFile}`);
+    try {
+      execSync(`crontab ${config.crontabFile}`);
+    } catch (error: any) {
+      const errorMsg = error.message || String(error);
+      this.logger.error('[crontab] Failed to update system crontab:', errorMsg);
+    }
+
     await CrontabModel.update({ saved: true }, { where: {} });
   }
 
   public importCrontab() {
-    exec('crontab -l', (error, stdout, stderr) => {
+    exec('crontab -l', (error, stdout) => {
+      if (error) {
+        const errorMsg = error.message || String(error);
+        this.logger.error('[crontab] Failed to read system crontab:', errorMsg);
+      }
+
       const lines = stdout.split('\n');
       const namePrefix = new Date().getTime();
 
@@ -670,7 +717,7 @@ export default class CronService {
         if (
           command &&
           schedule &&
-          cron_parser.parseExpression(schedule).hasNext()
+          CronExpressionParser.parse(schedule).hasNext()
         ) {
           const name = namePrefix + '_' + index;
 

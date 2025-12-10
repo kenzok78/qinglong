@@ -30,6 +30,7 @@ const dataMap = {
   'log-remove-frequency': 'logRemoveFrequency',
   'cron-concurrency': 'cronConcurrency',
   timezone: 'timezone',
+  'global-ssh-key': 'globalSshKey',
 };
 
 const exportModules = [
@@ -54,6 +55,7 @@ const Other = ({
     logRemoveFrequency?: number | null;
     cronConcurrency?: number | null;
     timezone?: string | null;
+    globalSshKey?: string | null;
   }>();
   const [form] = Form.useForm();
   const [exportLoading, setExportLoading] = useState(false);
@@ -240,6 +242,7 @@ const Other = ({
               addonBefore={intl.get('每')}
               addonAfter={intl.get('天')}
               style={{ width: 180 }}
+              placeholder={intl.get('未启用')}
               min={0}
               value={systemConfig?.logRemoveFrequency}
               onChange={(value) => {
@@ -261,8 +264,9 @@ const Other = ({
           <Input.Group compact>
             <InputNumber
               style={{ width: 180 }}
-              min={1}
+              min={4}
               value={systemConfig?.cronConcurrency}
+              placeholder={intl.get('默认为 CPU 个数')}
               onChange={(value) => {
                 setSystemConfig({ ...systemConfig, cronConcurrency: value });
               }}
@@ -305,6 +309,32 @@ const Other = ({
               {intl.get('确认')}
             </Button>
           </Input.Group>
+        </Form.Item>
+        <Form.Item 
+          label={intl.get('全局SSH私钥')} 
+          name="globalSshKey"
+          tooltip={intl.get('用于访问所有私有仓库的全局SSH私钥')}
+        >
+          <Input.Group compact>
+            <Input.TextArea
+              value={systemConfig?.globalSshKey || ''}
+              style={{ width: 264 }}
+              autoSize={{ minRows: 3, maxRows: 8 }}
+              placeholder={intl.get('请输入完整的SSH私钥内容')}
+              onChange={(e) => {
+                setSystemConfig({ ...systemConfig, globalSshKey: e.target.value });
+              }}
+            />
+          </Input.Group>
+          <Button
+            type="primary"
+            onClick={() => {
+              updateSystemConfig('global-ssh-key');
+            }}
+            style={{ width: 264, marginTop: 8 }}
+          >
+            {intl.get('确认')}
+          </Button>
         </Form.Item>
         <Form.Item label={intl.get('语言')} name="lang">
           <Select
