@@ -37,6 +37,8 @@ import ScheduleService, { TaskCallbacks } from './schedule';
 import SockService from './sock';
 import os from 'os';
 import dayjs from 'dayjs';
+import { t, setLang } from '../shared/i18n';
+import { updateLinuxMirrorFile } from '../config/util';
 
 @Service()
 export default class SystemService {
@@ -86,7 +88,7 @@ export default class SystemService {
       });
       return { code: 200, data: { ...result, code } };
     } else {
-      return { code: 400, message: '通知发送失败，请检查参数' };
+      return { code: 400, message: t('通知发送失败，请检查参数') };
     }
   }
 
@@ -214,33 +216,11 @@ export default class SystemService {
     onEnd?: () => void,
   ) {
     const oDoc = await this.getSystemConfig();
-    await this.updateAuthDb({
-      ...oDoc,
-      info: { ...oDoc.info, ...info },
-    });
-    let defaultDomain = 'https://dl-cdn.alpinelinux.org';
-    let targetDomain = 'https://dl-cdn.alpinelinux.org';
     if (os.platform() !== 'linux') {
       return;
     }
-    const content = await fs.promises.readFile('/etc/apk/repositories', {
-      encoding: 'utf-8',
-    });
-    const domainMatch = content.match(/(http.*)\/alpine\/.*/);
-    if (domainMatch) {
-      defaultDomain = domainMatch[1];
-    }
-    if (info.linuxMirror) {
-      targetDomain = info.linuxMirror;
-    }
-    const command = `sed -i 's/${defaultDomain.replace(
-      /\//g,
-      '\\/',
-    )}/${targetDomain.replace(
-      /\//g,
-      '\\/',
-    )}/g' /etc/apk/repositories && apk update -f`;
-
+    const command = await updateLinuxMirrorFile(info.linuxMirror || '');
+    let hasError = false;
     this.scheduleService.runTask(
       command,
       {
@@ -254,8 +234,15 @@ export default class SystemService {
             message: 'update linux mirror end',
           });
           onEnd?.();
+          if (!hasError) {
+            await this.updateAuthDb({
+              ...oDoc,
+              info: { ...oDoc.info, ...info },
+            });
+          }
         },
         onError: async (message: string) => {
+          hasError = true;
           this.sockService.sendMessage({ type: 'updateLinuxMirror', message });
         },
         onLog: async (message: string) => {
@@ -395,9 +382,9 @@ export default class SystemService {
       notificationInfo,
     );
     if (isSuccess) {
-      return { code: 200, message: '通知发送成功' };
+      return { code: 200, message: t('通知发送成功') };
     } else {
-      return { code: 400, message: '通知发送失败，请检查系统设置/通知配置' };
+      return { code: 400, message: t('通知发送失败，请检查系统设置/通知配置') };
     }
   }
 
@@ -415,7 +402,7 @@ export default class SystemService {
 
   public async stop({ command, pid }: { command: string; pid: number }) {
     if (!pid && !command) {
-      return { code: 400, message: '参数错误' };
+      return { code: 400, message: t('参数错误') };
     }
 
     if (pid) {
@@ -431,7 +418,7 @@ export default class SystemService {
       await killTask(_pid);
       return { code: 200 };
     } else {
-      return { code: 400, message: '任务未找到' };
+      return { code: 400, message: t('任务未找到') };
     }
   }
 
@@ -526,8 +513,28 @@ export default class SystemService {
     if (success) {
       return { code: 200, data: info };
     } else {
-      return { code: 400, message: '设置时区失败' };
+      return { code: 400, message: t('设置时区失败') };
     }
+  }
+
+  public async updateLanguage(info: SystemModelInfo) {
+    const oDoc = await this.getSystemConfig();
+    const lang = info.lang || 'zh';
+    await this.updateAuthDb({
+      ...oDoc,
+      info: { ...oDoc.info, lang },
+    });
+    // Write to standalone lang_env.sh, sourced by shell scripts
+    try {
+      await fs.promises.writeFile(
+        config.langEnvFile,
+        `export QL_LANG='${lang}'\n`,
+      );
+    } catch (error) {
+      this.logger.error(`Failed to write lang_env.sh: ${error}`);
+    }
+    setLang(lang);
+    return { code: 200, data: { lang } };
   }
 
   public async updateGlobalSshKey(info: SystemModelInfo) {
@@ -553,7 +560,7 @@ export default class SystemService {
 
   public async cleanDependence(type: 'node' | 'python3') {
     if (!type || !['node', 'python3'].includes(type)) {
-      return { code: 400, message: '参数错误' };
+      return { code: 400, message: t('参数错误') };
     }
     try {
       const finalPath = path.join(config.dependenceCachePath, type);

@@ -89,7 +89,7 @@ export default function () {
         if (code === 200 && data.username) {
           setUser(data);
           if (location.pathname === '/') {
-            history.push('/crontab');
+            history.push('/dashboard');
           }
         }
         needLoading && setLoading(false);
@@ -132,6 +132,23 @@ export default function () {
 
   useEffect(() => {
     getHealthStatus();
+  }, []);
+
+  useEffect(() => {
+    request
+      .get(`${config.apiPrefix}system/config`)
+      .then(({ data }: any) => {
+        if (!data?.info?.lang) {
+          const browserLang =
+            localStorage.getItem('lang') ||
+            navigator.language?.slice(0, 2) ||
+            'zh';
+          request
+            .put(`${config.apiPrefix}system/config/lang`, { lang: browserLang })
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -201,7 +218,7 @@ export default function () {
 
   if (['/login', '/initialization', '/error'].includes(location.pathname)) {
     if (systemInfo?.isInitialized && location.pathname === '/initialization') {
-      history.push('/crontab');
+      history.push('/dashboard');
     }
 
     if (systemInfo || location.pathname === '/error') {

@@ -3,6 +3,7 @@ import nodemailer from 'nodemailer';
 import { Inject, Service } from 'typedi';
 import { parseBody, parseHeaders } from '../config/util';
 import { NotificationInfo } from '../data/notify';
+import { t } from '../shared/i18n';
 import UserService from './user';
 import { httpClient } from '../config/http';
 import { ProxyAgent } from 'undici';
@@ -34,6 +35,7 @@ export default class NotificationService {
     ['chronocat', this.chronocat],
     ['ntfy', this.ntfy],
     ['wxPusherBot', this.wxPusherBot],
+    ['openiLink', this.openiLink],
   ]);
 
   private title = '';
@@ -88,6 +90,14 @@ export default class NotificationService {
       return await notificationModeAction?.call(this);
     }
     return true;
+  }
+
+  private parseMailRecipients(value?: string) {
+    const recipients = (value || '')
+      .split(/[;；]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    return recipients.length > 0 ? recipients : undefined;
   }
 
   private async gotify() {
@@ -591,6 +601,7 @@ export default class NotificationService {
 
   private async email() {
     const { emailPass, emailService, emailUser, emailTo } = this.params;
+    const recipients = this.parseMailRecipients(emailTo) || emailUser;
 
     try {
       const transporter = nodemailer.createTransport({
@@ -603,7 +614,7 @@ export default class NotificationService {
 
       const info = await transporter.sendMail({
         from: `"青龙快讯" <${emailUser}>`,
-        to: emailTo ? emailTo.split(';') : emailUser,
+        to: recipients,
         subject: `${this.title}`,
         html: `${this.content.replace(/\n/g, '<br/>')}`,
       });
@@ -717,7 +728,7 @@ export default class NotificationService {
 
     // topic_ids 和 uids 至少要有一个
     if (!topicIds.length && !uids.length) {
-      throw new Error('wxPusher 服务的 TopicIds 和 Uids 至少配置一个才行');
+      throw new Error(t('wxPusher 服务的 TopicIds 和 Uids 至少配置一个才行'));
     }
 
     const url = `https://wxpusher.zjiecode.com/api/send/message`;
@@ -813,7 +824,7 @@ export default class NotificationService {
     } = this.params;
 
     if (!webhookUrl?.includes('$title') && !webhookBody?.includes('$title')) {
-      throw new Error('Url 或者 Body 中必须包含 $title');
+      throw new Error(t('Url 或者 Body 中必须包含 $title'));
     }
 
     const headers = parseHeaders(webhookHeaders);
@@ -857,5 +868,36 @@ export default class NotificationService {
         return { body };
     }
     return {};
+  }
+
+  private async openiLink() {
+    const { openiLinkAppToken, openiLinkHubUrl, openiLinkContextToken } =
+      this.params;
+    const baseUrl = openiLinkHubUrl?.replace(/\/$/, '') || 'https://hub.openilink.com';
+    const url = `${baseUrl}/bot/v1/message/send`;
+    const body: Record<string, string> = {
+      type: 'text',
+      content: `${this.title}\n\n${this.content}`,
+    };
+    if (openiLinkContextToken) {
+      body.context_token = openiLinkContextToken;
+    }
+    try {
+      const res = await httpClient.post(url, {
+        ...this.gotOption,
+        json: body,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${openiLinkAppToken}`,
+        },
+      });
+      if (res.ok) {
+        return true;
+      } else {
+        throw new Error(JSON.stringify(res));
+      }
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
   }
 }

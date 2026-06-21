@@ -65,17 +65,7 @@ link_name=(
 )
 
 init_env() {
-  local pnpm_global_path=$(pnpm root -g 2>/dev/null)
-  export NODE_PATH="/usr/local/bin:/usr/local/lib/node_modules${pnpm_global_path:+:${pnpm_global_path}}"
-
-  # 如果存在 pnpm 全局路径，创建软链接
-  if [[ -n "$pnpm_global_path" ]]; then
-    # 确保目标目录存在
-    mkdir -p "${dir_root}/node_modules"
-    # 链接全局模块到项目的 node_modules
-    ln -sf "${pnpm_global_path}/"* "${dir_root}/node_modules/" 2>/dev/null || true
-  fi
-
+  export NODE_PATH="/usr/local/bin:/usr/local/lib/node_modules"
   export PYTHONUNBUFFERED=1
 }
 
@@ -88,6 +78,16 @@ load_ql_envs() {
 
 import_config() {
   [[ -f $file_config_user ]] && . $file_config_user
+  [[ -f $dir_preload/lang_env.sh ]] && . $dir_preload/lang_env.sh
+
+  # 加载语言包（bash 4+ 支持 declare -A，不兼容时回退输出中文 key）
+  local lang=${QL_LANG:-zh}
+  local lang_file="$dir_shell/lang/${lang}.sh"
+  if [[ ${BASH_VERSINFO[0]} -ge 4 ]] && [[ -f $lang_file ]]; then
+    . $lang_file
+  elif [[ ${BASH_VERSINFO[0]} -ge 4 ]]; then
+    . "$dir_shell/lang/zh.sh"
+  fi
 
   load_ql_envs
   command_timeout_time=${CommandTimeoutTime:-""}
@@ -99,6 +99,18 @@ import_config() {
   else
     default_cron="$(random_range 0 59) $(random_range 0 23) * * *"
   fi
+}
+
+t() {
+  local key="$1"
+  shift
+  local msg
+  if declare -p LANG_MESSAGES &>/dev/null; then
+    msg="${LANG_MESSAGES["$key"]}"
+  fi
+  [[ -z $msg ]] && msg="$key"
+  # shellcheck disable=SC2059
+  printf "$msg\n" "$@"
 }
 
 set_proxy() {
@@ -235,7 +247,7 @@ npm_install_2() {
   local dir_work=$1
 
   cd $dir_work
-  echo -e "安装 $dir_work 依赖包...\n"
+  t '安装 %s 依赖包...\n' "$dir_work"
   npm_install_sub
   cd $dir_current
 }
@@ -254,7 +266,7 @@ git_clone_scripts() {
   local branch="$3"
   local proxy="$4"
   [[ $branch ]] && local part_cmd="-b $branch "
-  echo -e "开始拉取仓库 ${uniq_path} 到 $dir\n"
+  t '开始拉取仓库 %s 到 %s\n' "${uniq_path}" "$dir"
 
   set_proxy "$proxy"
 
@@ -287,18 +299,18 @@ reload_pm2() {
     return 0
   else
     local exit_code=$?
-    echo "警告: PM2 启动失败 (退出码: $exit_code)，可能是由于硬件不兼容"
-    echo "正在尝试直接使用 Node.js 启动服务..."
-    
+    t '警告: PM2 启动失败 (退出码: %s)，可能是由于硬件不兼容' "$exit_code"
+    t '正在尝试直接使用 Node.js 启动服务...'
+
     # Kill any existing node processes for qinglong
     pkill -f "node.*static/build/app.js" 2>/dev/null || true
-    
+
     # Start node directly in the background
     nohup node static/build/app.js > $dir_log/qinglong.log 2>&1 &
     local node_pid=$!
-    
-    echo "已使用 Node.js 直接启动服务 (PID: $node_pid)"
-    echo "注意: 使用此模式时，部分 PM2 管理功能将不可用"
+
+    t '已使用 Node.js 直接启动服务 (PID: %s)' "$node_pid"
+    t '注意: 使用此模式时，部分 PM2 管理功能将不可用'
     return 0
   fi
 }
@@ -370,16 +382,16 @@ handle_task_start() {
       error_message=", 任务状态更新失败(${error})"
     fi
   fi
-  echo -e "## 开始执行... ${begin_time}${error_message}\n"
+  t '## 开始执行... %s\n' "${begin_time}${error_message}"
 }
 
 run_task_before() {
   . $file_task_before "$@"
 
   if [[ ${task_before:=} ]]; then
-    echo -e "执行前置命令\n"
+    t '执行前置命令\n'
     eval "${task_before%;}"
-    echo -e "\n执行前置命令结束\n"
+    t '\n执行前置命令结束\n'
   fi
 }
 
@@ -387,9 +399,9 @@ run_task_after() {
   . $file_task_after "$@"
 
   if [[ ${task_after:=} ]]; then
-    echo -e "\n执行后置命令\n"
+    t '\n执行后置命令\n'
     eval "${task_after%;}"
-    echo -e "\n执行后置命令结束"
+    t '\n执行后置命令结束'
   fi
 }
 
@@ -398,18 +410,25 @@ handle_task_end() {
   local end_time=$(format_time "$time_format" "$etime")
   local end_timestamp=$(format_timestamp "$time_format" "$etime")
   local diff_time=$(($end_timestamp - $begin_timestamp))
-  local suffix=""
-  [[ "${MANUAL:=}" == "true" ]] && suffix="(手动停止)"
-
+  local exit_code="${_task_exit_code:-0}"
   [[ "$diff_time" == 0 ]] && diff_time=1
 
   if [[ $ID ]]; then
     local error=$(update_cron "\"$ID\"" "1" "$$" "$log_path" "$begin_timestamp" "$diff_time")
     if [[ $error ]]; then
-      error_message=", 任务状态更新失败(${error})"
+      error_message=", 状态更新失败(${error})"
     fi
   fi
-  echo -e "\n## 执行结束$suffix... $end_time  耗时 $diff_time 秒${error_message:=}　　　　　"
+
+  record_cron_stat "$ID" "${exit_code:-0}" "$diff_time"
+
+  if [[ "${MANUAL:=}" == "true" ]]; then
+    t '\n## 已停止 🛑... %s  耗时 %s 秒%s' "$end_time" "$diff_time" "${error_message:=}　　　　　"
+  elif [[ $exit_code -eq 0 ]]; then
+    t '\n## 完成 ✅... %s  耗时 %s 秒%s' "$end_time" "$diff_time" "${error_message:=}　　　　　"
+  else
+    t '\n## 失败 ❌(退出码 %s)... %s  耗时 %s 秒%s' "$exit_code" "$end_time" "$diff_time" "${error_message:=}　　　　　"
+  fi
 }
 
 init_env

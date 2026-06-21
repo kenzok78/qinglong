@@ -4,8 +4,9 @@ import { Logger } from 'winston';
 import config from '../config';
 import * as fs from 'fs/promises';
 import { celebrate, Joi } from 'celebrate';
-import { join } from 'path';
+import { join, basename } from 'path';
 import { SAMPLE_FILES } from '../config/const';
+import { t } from '../shared/i18n';
 import ConfigService from '../services/config';
 import { writeFileWithLock } from '../shared/utils';
 const route = Router();
@@ -14,7 +15,7 @@ export default (app: Router) => {
   app.use('/configs', route);
 
   route.get(
-    '/sample',
+    '/samples',
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         res.send({
@@ -71,15 +72,24 @@ export default (app: Router) => {
       const logger: Logger = Container.get('logger');
       try {
         const { name, content } = req.body;
-        if (config.blackFileList.includes(name)) {
-          res.send({ code: 403, message: '文件无法访问' });
-        }
-        let path = join(config.configPath, name);
+        // Resolve path first to prevent traversal attacks
+        let basePath = config.configPath;
         if (name.startsWith('data/scripts/')) {
-          path = join(config.rootPath, name);
+          basePath = join(config.rootPath, 'data/scripts');
         }
-        await writeFileWithLock(path, content);
-        res.send({ code: 200, message: '保存成功' });
+        const cleanName = name.replace(/^data\/scripts\//, '');
+        const resolvedPath = join(basePath, cleanName);
+        const normalized = join(resolvedPath);
+        // Verify the resolved path stays within allowed directory
+        if (!normalized.startsWith(basePath)) {
+          return res.send({ code: 403, message: t('文件路径无效') });
+        }
+        // Check blacklist on actual filename (not user input)
+        if (config.blackFileList.includes(basename(normalized))) {
+          return res.send({ code: 403, message: t('文件无法访问') });
+        }
+        await writeFileWithLock(normalized, content);
+        res.send({ code: 200, message: t('保存成功') });
       } catch (e) {
         return next(e);
       }

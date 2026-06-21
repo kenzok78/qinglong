@@ -9,6 +9,8 @@ dotenv.config({
 interface Config {
   port: number;
   grpcPort: number;
+  bindHost: string;
+  bindHostGrpc: string;
   nodeEnv: string;
   isDevelopment: boolean;
   isProduction: boolean;
@@ -31,6 +33,8 @@ interface Config {
 const config: Config = {
   port: parseInt(process.env.BACK_PORT || '5700', 10),
   grpcPort: parseInt(process.env.GRPC_PORT || '5500', 10),
+  bindHost: process.env.BIND_HOST || '::',
+  bindHostGrpc: process.env.BIND_HOST_GRPC || '::',
   nodeEnv: process.env.NODE_ENV || 'development',
   isDevelopment: process.env.NODE_ENV === 'development',
   isProduction: process.env.NODE_ENV === 'production',
@@ -106,6 +110,7 @@ const jsEnvFile = path.join(preloadPath, 'env.js');
 const pyEnvFile = path.join(preloadPath, 'env.py');
 const jsNotifyFile = path.join(preloadPath, '__ql_notify__.js');
 const pyNotifyFile = path.join(preloadPath, '__ql_notify__.py');
+const langEnvFile = path.join(preloadPath, 'lang_env.sh');
 const confFile = path.join(configPath, 'config.sh');
 const crontabFile = path.join(configPath, 'crontab.list');
 const authConfigFile = path.join(configPath, 'auth.json');
@@ -151,6 +156,7 @@ export default {
   pyEnvFile,
   jsNotifyFile,
   pyNotifyFile,
+  langEnvFile,
   dbPath,
   uploadPath,
   configPath,
@@ -167,6 +173,8 @@ export default {
     'env.js',
     'env.py',
     'token.json',
+    'grpc',
+    '__pycache__',
   ],
   writePathList: [configPath, scriptPath],
   bakPath,

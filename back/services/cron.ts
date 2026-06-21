@@ -2,6 +2,10 @@ import { Service, Inject } from 'typedi';
 import winston from 'winston';
 import config from '../config';
 import { Crontab, CrontabModel, CrontabStatus } from '../data/cron';
+import {
+  RunningInstanceModel,
+  InstanceStatus,
+} from '../data/runningInstance';
 import { exec, execSync } from 'child_process';
 import fs from 'fs/promises';
 import CronExpressionParser from 'cron-parser';
@@ -24,8 +28,10 @@ import dayjs from 'dayjs';
 import pickBy from 'lodash/pickBy';
 import omit from 'lodash/omit';
 import { writeFileWithLock } from '../shared/utils';
+import { t } from '../shared/i18n';
 import { ScheduleType } from '../interface/schedule';
 import { logStreamManager } from '../shared/logStreamManager';
+import { isEmpty } from 'lodash';
 
 @Service()
 export default class CronService {
@@ -37,6 +43,25 @@ export default class CronService {
       return true;
     }
     return false;
+  }
+
+  private get schedulerMode(): 'system' | 'node' {
+    const env = process.env.QL_SCHEDULER;
+    if (env === 'system') return 'system';
+    if (env === 'node') return 'node';
+    try {
+      execSync('which crond', { stdio: 'ignore' });
+      return 'system';
+    } catch {
+      return 'node';
+    }
+  }
+
+  private shouldUseCronClient(cron: Crontab): boolean {
+    if (this.schedulerMode === 'node') {
+      return !this.isSpecialSchedule(cron.schedule);
+    }
+    return this.isNodeCron(cron) && !this.isSpecialSchedule(cron.schedule);
   }
 
   private isOnceSchedule(schedule?: string) {
@@ -80,7 +105,7 @@ export default class CronService {
       return doc;
     }
 
-    if (this.isNodeCron(doc) && !this.isSpecialSchedule(doc.schedule)) {
+    if (this.shouldUseCronClient(doc)) {
       await cronClient.addCron([
         {
           name: doc.name || '',
@@ -111,11 +136,9 @@ export default class CronService {
       return newDoc;
     }
 
-    if (this.isNodeCron(doc)) {
-      await cronClient.delCron([String(doc.id)]);
-    }
+    await cronClient.delCron([String(newDoc.id)]);
 
-    if (this.isNodeCron(newDoc) && !this.isSpecialSchedule(newDoc.schedule)) {
+    if (this.shouldUseCronClient(newDoc)) {
       await cronClient.addCron([
         {
           name: doc.name || '',
@@ -172,6 +195,35 @@ export default class CronService {
       if (status === CrontabStatus.idle && log_path !== cron.log_path) {
         options = omit(options, ['status', 'log_path', 'pid']);
       }
+
+      // Manage RunningInstance records for status transitions from shell scripts
+      if (status === CrontabStatus.running) {
+        // Create a new running instance record
+        await RunningInstanceModel.create({
+          cron_id: id,
+          pid: pid || undefined,
+          log_path: log_path || undefined,
+          started_at: last_execution_time || dayjs().unix(),
+          status: InstanceStatus.running,
+        });
+      } else if (status === CrontabStatus.idle) {
+        // Mark the matching running instance as finished
+        const finishedAt = dayjs().unix();
+        await RunningInstanceModel.update(
+          {
+            finished_at: finishedAt,
+            status: InstanceStatus.finished,
+          },
+          {
+            where: {
+              cron_id: id,
+              pid: pid || undefined,
+              status: InstanceStatus.running,
+            },
+          },
+        );
+      }
+
       await CrontabModel.update(
         { ...pickBy(options, (v) => v === 0 || !!v) },
         { where: { id } },
@@ -350,7 +402,7 @@ export default class CronService {
   }
 
   private formatFilterQuery(query: any, filterQuery: any) {
-    if (filterQuery) {
+    if (!isEmpty(filterQuery)) {
       if (!query[Op.and]) {
         query[Op.and] = [];
       }
@@ -482,10 +534,51 @@ export default class CronService {
       }
     }
 
+    // Mark all running instances as stopped
+    const finishedAt = dayjs().unix();
+    await RunningInstanceModel.update(
+      { status: InstanceStatus.stopped, finished_at: finishedAt },
+      { where: { cron_id: ids, status: InstanceStatus.running } },
+    );
+
     await CrontabModel.update(
       { status: CrontabStatus.idle, pid: undefined },
       { where: { id: ids } },
     );
+  }
+
+  public async stopInstance(instanceId: number) {
+    const instance = await RunningInstanceModel.findOne({
+      where: { id: instanceId, status: InstanceStatus.running },
+    });
+    if (!instance) {
+      return { code: 400, message: t('实例不存在或已停止') };
+    }
+    if (instance.pid) {
+      try {
+        await killTask(instance.pid);
+      } catch (error) {
+        this.logger.error(
+          `[panel][停止实例失败] 实例ID: ${instanceId}, PID: ${instance.pid}, 错误: ${error}`,
+        );
+      }
+    }
+    await RunningInstanceModel.update(
+      { status: InstanceStatus.stopped, finished_at: dayjs().unix() },
+      { where: { id: instanceId } },
+    );
+
+    // Check if there are still other running instances for this cron
+    const otherRunning = await RunningInstanceModel.count({
+      where: { cron_id: instance.cron_id, status: InstanceStatus.running },
+    });
+    if (otherRunning === 0) {
+      await CrontabModel.update(
+        { status: CrontabStatus.idle, pid: undefined },
+        { where: { id: instance.cron_id } },
+      );
+    }
+    return { code: 200, message: t('实例已停止') };
   }
 
   private async runSingle(cronId: number): Promise<number | void> {
@@ -526,6 +619,15 @@ export default class CronService {
           { shell: '/bin/bash' },
         );
 
+        const startedAt = dayjs().unix();
+        const instance = await RunningInstanceModel.create({
+          cron_id: id!,
+          pid: cp.pid,
+          log_path: logPath,
+          started_at: startedAt,
+          status: InstanceStatus.running,
+        });
+
         await CrontabModel.update(
           { status: CrontabStatus.running, pid: cp.pid, log_path: logPath },
           { where: { id } },
@@ -556,12 +658,27 @@ export default class CronService {
             JSON.stringify(params),
             code,
           );
-          // Close the stream after task completion
           await logStreamManager.closeStream(absolutePath);
-          await CrontabModel.update(
-            { status: CrontabStatus.idle, pid: undefined },
-            { where: { id } },
+          const finishedAt = dayjs().unix();
+          await RunningInstanceModel.update(
+            {
+              finished_at: finishedAt,
+              status: code === 0 ? InstanceStatus.finished : InstanceStatus.error,
+              exit_code: code ?? undefined,
+            },
+            { where: { id: instance.id } },
           );
+
+          // Only set cron to idle if no other running instances exist
+          const otherRunning = await RunningInstanceModel.count({
+            where: { cron_id: id!, status: InstanceStatus.running },
+          });
+          if (otherRunning === 0) {
+            await CrontabModel.update(
+              { status: CrontabStatus.idle, pid: undefined },
+              { where: { id } },
+            );
+          }
           resolve({ ...params, pid: cp.pid, code });
         });
       });
@@ -577,8 +694,8 @@ export default class CronService {
   public async enabled(ids: number[]) {
     await CrontabModel.update({ isDisabled: 0 }, { where: { id: ids } });
     const docs = await CrontabModel.findAll({ where: { id: ids } });
-    const sixCron = docs
-      .filter((x) => this.isNodeCron(x) && !this.isSpecialSchedule(x.schedule))
+    const crons = docs
+      .filter((x) => this.shouldUseCronClient(x))
       .map((doc) => ({
         name: doc.name || '',
         id: String(doc.id),
@@ -590,7 +707,8 @@ export default class CronService {
     if (isDemoEnv()) {
       return;
     }
-    await cronClient.addCron(sixCron);
+
+    await cronClient.addCron(crons);
     await this.setCrontab();
   }
 
@@ -661,6 +779,9 @@ export default class CronService {
         .replace(/;? *\n/g, ';')
         .trim()}' `;
     }
+    if (tab.work_dir) {
+      commandVariable += `work_dir='${tab.work_dir.replace(/'/g, "'\\''")}' `;
+    }
 
     const crontab_job_string = `${commandVariable}${command}`;
     return crontab_job_string;
@@ -690,11 +811,13 @@ export default class CronService {
 
     await writeFileWithLock(config.crontabFile, crontab_string);
 
-    try {
-      execSync(`crontab ${config.crontabFile}`);
-    } catch (error: any) {
-      const errorMsg = error.message || String(error);
-      this.logger.error('[crontab] Failed to update system crontab:', errorMsg);
+    if (this.schedulerMode === 'system') {
+      try {
+        execSync(`crontab ${config.crontabFile}`);
+      } catch (error: any) {
+        const errorMsg = error.message || String(error);
+        this.logger.error('[crontab] Failed to update system crontab:', errorMsg);
+      }
     }
 
     await CrontabModel.update({ saved: true }, { where: {} });
@@ -745,8 +868,7 @@ export default class CronService {
       .filter(
         (x) =>
           x.isDisabled !== 1 &&
-          this.isNodeCron(x) &&
-          !this.isSpecialSchedule(x.schedule),
+          this.shouldUseCronClient(x),
       )
       .map((doc) => ({
         name: doc.name || '',
@@ -775,7 +897,7 @@ export default class CronService {
         { where: { id: bootTasks.map((t) => t.id!) } },
       );
       for (const task of bootTasks) {
-        await this.runSingle(task.id!);
+        this.runSingle(task.id!);
       }
     }
   }

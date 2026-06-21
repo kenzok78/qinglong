@@ -6,6 +6,7 @@ import config from '../config';
 import SystemService from '../services/system';
 import { celebrate, Joi } from 'celebrate';
 import UserService from '../services/user';
+import { t } from '../shared/i18n';
 import {
   getUniqPath,
   handleLogPath,
@@ -401,7 +402,7 @@ export default (app: Router) => {
       try {
         const userService = Container.get(UserService);
         await userService.resetAuthInfo(req.body);
-        res.send({ code: 200, message: '更新成功' });
+        res.send({ code: 200, message: t('更新成功') });
       } catch (e) {
         return next(e);
       }
@@ -419,6 +420,24 @@ export default (app: Router) => {
       try {
         const systemService = Container.get(SystemService);
         const result = await systemService.updateTimezone(req.body);
+        res.send(result);
+      } catch (e) {
+        return next(e);
+      }
+    },
+  );
+
+  route.put(
+    '/config/lang',
+    celebrate({
+      body: Joi.object({
+        lang: Joi.string().allow('').allow(null),
+      }),
+    }),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const systemService = Container.get(SystemService);
+        const result = await systemService.updateLanguage(req.body);
         res.send(result);
       } catch (e) {
         return next(e);

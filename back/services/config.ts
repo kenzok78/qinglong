@@ -2,6 +2,7 @@ import { Service, Inject } from 'typedi';
 import path, { join } from 'path';
 import config from '../config';
 import { getFileContentByName } from '../config/util';
+import { t } from '../shared/i18n';
 import { Response } from 'express';
 import { request } from 'undici';
 
@@ -11,19 +12,25 @@ export default class ConfigService {
 
   public async getFile(filePath: string, res: Response) {
     let content = '';
-    const avaliablePath = [config.rootPath, config.configPath].map((x) =>
-      path.resolve(x, filePath),
-    );
-
-    if (
-      config.blackFileList.includes(filePath) ||
-      avaliablePath.every(
-        (x) =>
-          !x.startsWith(config.scriptPath) && !x.startsWith(config.configPath),
-      ) ||
-      !filePath
-    ) {
-      return res.send({ code: 403, message: '文件无法访问' });
+    if (!filePath) {
+      return res.send({ code: 403, message: t('文件无法访问') });
+    }
+    const normalized = path.normalize(filePath);
+    if (normalized.startsWith('..') || path.isAbsolute(normalized)) {
+      return res.send({ code: 403, message: t('文件无法访问') });
+    }
+    const resolvedRoot = path.resolve(config.rootPath, normalized);
+    const resolvedConfig = path.resolve(config.configPath, normalized);
+    const isValidPath =
+      resolvedRoot.startsWith(config.scriptPath) ||
+      resolvedRoot.startsWith(config.configPath) ||
+      resolvedConfig.startsWith(config.scriptPath) ||
+      resolvedConfig.startsWith(config.configPath);
+    if (!isValidPath) {
+      return res.send({ code: 403, message: t('文件无法访问') });
+    }
+    if (config.blackFileList.includes(path.basename(normalized))) {
+      return res.send({ code: 403, message: t('文件无法访问') });
     }
 
     if (filePath.startsWith('sample/')) {

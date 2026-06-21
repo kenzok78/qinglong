@@ -6,6 +6,8 @@ import { AppModel } from '../data/open';
 import { SystemModel } from '../data/system';
 import { SubscriptionModel } from '../data/subscription';
 import { CrontabViewModel } from '../data/cronView';
+import { CrontabStatModel } from '../data/cronStats';
+import { RunningInstanceModel } from '../data/runningInstance';
 import { sequelize } from '../data';
 
 export default async () => {
@@ -17,6 +19,8 @@ export default async () => {
     await EnvModel.sync();
     await SubscriptionModel.sync();
     await CrontabViewModel.sync();
+    await CrontabStatModel.sync();
+    await RunningInstanceModel.sync();
 
     // 初始化新增字段
     const migrations = [
@@ -39,7 +43,9 @@ export default async () => {
         column: 'allow_multiple_instances',
         type: 'NUMBER',
       },
+      { table: 'Crontabs', column: 'work_dir', type: 'VARCHAR(255)' },
       { table: 'Envs', column: 'isPinned', type: 'NUMBER' },
+      { table: 'Envs', column: 'labels', type: 'JSON' },
     ];
 
     for (const migration of migrations) {

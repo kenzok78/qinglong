@@ -1,6 +1,40 @@
 const { execSync } = require('child_process');
+const Module = require('module');
+const path = require('path');
 const client = require('./client.js');
 require(`./env.js`);
+
+// 注册 ESM loader，使全局安装的包也可通过 import 导入
+try {
+  Module.register(new URL('esm-loader.mjs', `file://${__dirname}/`).href);
+} catch (_) {}
+
+function preferGlobalNodeModules() {
+  const { QL_NODE_GLOBAL_PATH } = process.env;
+  if (!QL_NODE_GLOBAL_PATH || Module._qlGlobalPathPatched) {
+    return;
+  }
+
+  const originalResolveFilename = Module._resolveFilename;
+  Module._resolveFilename = function (request, parent, isMain, options) {
+    if (
+      !Module.builtinModules.includes(request) &&
+      !request.startsWith('node:') &&
+      !request.startsWith('.') &&
+      !path.isAbsolute(request)
+    ) {
+      try {
+        return originalResolveFilename.call(this, request, parent, isMain, {
+          ...options,
+          paths: [QL_NODE_GLOBAL_PATH],
+        });
+      } catch (error) {}
+    }
+
+    return originalResolveFilename.call(this, request, parent, isMain, options);
+  };
+  Module._qlGlobalPathPatched = true;
+}
 
 function expandRange(rangeStr, max) {
   const tempRangeStr = rangeStr
@@ -112,6 +146,8 @@ try {
   if (!process.argv[1]) {
     return;
   }
+
+  preferGlobalNodeModules();
 
   process.on('SIGTERM', (code) => {
     process.exit(15);

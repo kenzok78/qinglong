@@ -6,6 +6,7 @@ import { Container } from 'typedi';
 import { Logger } from 'winston';
 import config from '../config';
 import { safeJSONParse } from '../config/util';
+import { t } from '../shared/i18n';
 import EnvService from '../services/env';
 const route = Router();
 
@@ -18,6 +19,10 @@ const storage = multer.diskStorage({
   },
 });
 const upload = multer({ storage: storage });
+const labelSchema = Joi.array()
+  .items(Joi.string().trim().required())
+  .min(1)
+  .required();
 
 export default (app: Router) => {
   app.use('/envs', route);
@@ -44,6 +49,7 @@ export default (app: Router) => {
             .required()
             .pattern(/^[a-zA-Z_][0-9a-zA-Z_]*$/),
           remarks: Joi.string().optional().allow(''),
+          labels: Joi.array().items(Joi.string().trim()).optional(),
         }),
       ),
     }),
@@ -52,7 +58,7 @@ export default (app: Router) => {
       try {
         const envService = Container.get(EnvService);
         if (!req.body?.length) {
-          return res.send({ code: 400, message: '参数不正确' });
+          return res.send({ code: 400, message: t('参数不正确') });
         }
         const data = await envService.create(req.body);
         return res.send({ code: 200, data });
@@ -70,6 +76,7 @@ export default (app: Router) => {
         name: Joi.string().required(),
         remarks: Joi.string().optional().allow('').allow(null),
         id: Joi.number().required(),
+        labels: Joi.array().items(Joi.string().trim()).optional(),
       }),
     }),
     async (req: Request, res: Response, next: NextFunction) => {
@@ -231,6 +238,44 @@ export default (app: Router) => {
   );
 
   route.post(
+    '/labels',
+    celebrate({
+      body: Joi.object({
+        ids: Joi.array().items(Joi.number().required()).min(1).required(),
+        labels: labelSchema,
+      }),
+    }),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const envService = Container.get(EnvService);
+        const data = await envService.addLabels(req.body.ids, req.body.labels);
+        return res.send({ code: 200, data });
+      } catch (e) {
+        return next(e);
+      }
+    },
+  );
+
+  route.delete(
+    '/labels',
+    celebrate({
+      body: Joi.object({
+        ids: Joi.array().items(Joi.number().required()).min(1).required(),
+        labels: labelSchema,
+      }),
+    }),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const envService = Container.get(EnvService);
+        const data = await envService.removeLabels(req.body.ids, req.body.labels);
+        return res.send({ code: 200, data });
+      } catch (e) {
+        return next(e);
+      }
+    },
+  );
+
+  route.post(
     '/upload',
     upload.single('env'),
     async (req: Request, res: Response, next: NextFunction) => {
@@ -248,13 +293,14 @@ export default (app: Router) => {
               name: x.name,
               value: x.value,
               remarks: x.remarks,
+              labels: x.labels,
             })),
           );
           return res.send({ code: 200, data: result });
         } else {
           return res.send({
             code: 400,
-            message: '每条数据 name 或者 value 字段不能为空，参考导出文件格式',
+            message: t('每条数据 name 或者 value 字段不能为空，参考导出文件格式'),
           });
         }
       } catch (e) {

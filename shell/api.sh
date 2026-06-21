@@ -41,7 +41,7 @@ add_cron_api() {
   fi
 
   local api=$(
-    curl -s --noproxy "*" "http://0.0.0.0:${ql_port}/open/crons?t=$currentTimeStamp" \
+    curl -s --noproxy "*" "http://localhost:${ql_port}/open/crons?t=$currentTimeStamp" \
       -H "Authorization: Bearer ${__ql_token__}" \
       -H "Content-Type: application/json;charset=UTF-8" \
       --data-raw "{\"name\":\"${name//\"/\\\"}\",\"command\":\"${command//\"/\\\"}\",\"schedule\":\"$schedule\",\"sub_id\":$sub_id}" \
@@ -50,9 +50,9 @@ add_cron_api() {
   code=$(echo "$api" | jq -r .code)
   message=$(echo "$api" | jq -r .message)
   if [[ $code == 200 ]]; then
-    echo -e "$name -> 添加成功"
+    t '%s -> 添加成功' "$name"
   else
-    echo -e "$name -> 添加失败(${message})"
+    t '%s -> 添加失败(%s)' "$name" "$message"
   fi
 }
 
@@ -71,7 +71,7 @@ update_cron_api() {
   fi
 
   local api=$(
-    curl -s --noproxy "*" "http://0.0.0.0:${ql_port}/open/crons?t=$currentTimeStamp" \
+    curl -s --noproxy "*" "http://localhost:${ql_port}/open/crons?t=$currentTimeStamp" \
       -X 'PUT' \
       -H "Authorization: Bearer ${__ql_token__}" \
       -H "Content-Type: application/json;charset=UTF-8" \
@@ -81,9 +81,9 @@ update_cron_api() {
   code=$(echo "$api" | jq -r .code)
   message=$(echo "$api" | jq -r .message)
   if [[ $code == 200 ]]; then
-    echo -e "$name -> 更新成功"
+    t '%s -> 更新成功' "$name"
   else
-    echo -e "$name -> 更新失败(${message})"
+    t '%s -> 更新失败(%s)' "$name" "$message"
   fi
 }
 
@@ -98,7 +98,7 @@ update_cron_command_api() {
   fi
 
   local api=$(
-    curl -s --noproxy "*" "http://0.0.0.0:${ql_port}/open/crons?t=$currentTimeStamp" \
+    curl -s --noproxy "*" "http://localhost:${ql_port}/open/crons?t=$currentTimeStamp" \
       -X 'PUT' \
       -H "Authorization: Bearer ${__ql_token__}" \
       -H "Content-Type: application/json;charset=UTF-8" \
@@ -108,9 +108,9 @@ update_cron_command_api() {
   code=$(echo "$api" | jq -r .code)
   message=$(echo "$api" | jq -r .message)
   if [[ $code == 200 ]]; then
-    echo -e "$command -> 更新成功"
+    t '%s -> 更新成功' "$command"
   else
-    echo -e "$command -> 更新失败(${message})"
+    t '%s -> 更新失败(%s)' "$command" "$message"
   fi
 }
 
@@ -118,7 +118,7 @@ del_cron_api() {
   local ids="$1"
   local currentTimeStamp=$(date +%s)
   local api=$(
-    curl -s --noproxy "*" "http://0.0.0.0:${ql_port}/open/crons?t=$currentTimeStamp" \
+    curl -s --noproxy "*" "http://localhost:${ql_port}/open/crons?t=$currentTimeStamp" \
       -X 'DELETE' \
       -H "Authorization: Bearer ${__ql_token__}" \
       -H "Content-Type: application/json;charset=UTF-8" \
@@ -128,9 +128,9 @@ del_cron_api() {
   code=$(echo "$api" | jq -r .code)
   message=$(echo "$api" | jq -r .message)
   if [[ $code == 200 ]]; then
-    echo -e "成功"
+    t '成功'
   else
-    echo -e "失败(${message})"
+    t '失败(%s)' "$message"
   fi
 }
 
@@ -143,7 +143,7 @@ update_cron() {
   local runningTime="${6:-0}"
   local currentTimeStamp=$(date +%s)
   local api=$(
-    curl -s --noproxy "*" "http://0.0.0.0:${ql_port}/open/crons/status?t=$currentTimeStamp" \
+    curl -s --noproxy "*" "http://localhost:${ql_port}/open/crons/status?t=$currentTimeStamp" \
       -X 'PUT' \
       -H "Authorization: Bearer ${__ql_token__}" \
       -H "Content-Type: application/json;charset=UTF-8" \
@@ -165,7 +165,7 @@ notify_api() {
   local content="$2"
   local currentTimeStamp=$(date +%s)
   local api=$(
-    curl -s --noproxy "*" "http://0.0.0.0:${ql_port}/open/system/notify?t=$currentTimeStamp" \
+    curl -s --noproxy "*" "http://localhost:${ql_port}/open/system/notify?t=$currentTimeStamp" \
       -X 'PUT' \
       -H "Authorization: Bearer ${__ql_token__}" \
       -H "Content-Type: application/json;charset=UTF-8" \
@@ -175,9 +175,9 @@ notify_api() {
   code=$(echo "$api" | jq -r .code)
   message=$(echo "$api" | jq -r .message)
   if [[ $code == 200 ]]; then
-    echo -e "通知发送成功🎉"
+    t '通知发送成功🎉'
   else
-    echo -e "通知失败(${message})"
+    t '通知失败(%s)' "$message"
   fi
 }
 
@@ -185,7 +185,7 @@ find_cron_api() {
   local params="$1"
   local currentTimeStamp=$(date +%s)
   local api=$(
-    curl -s --noproxy "*" "http://0.0.0.0:${ql_port}/open/crons/detail?$params&t=$currentTimeStamp" \
+    curl -s --noproxy "*" "http://localhost:${ql_port}/open/crons/detail?$params&t=$currentTimeStamp" \
       -H "Authorization: Bearer ${__ql_token__}" \
       -H "Content-Type: application/json;charset=UTF-8" \
       --compressed
@@ -204,7 +204,7 @@ update_auth_config() {
   local tip="$2"
   local currentTimeStamp=$(date +%s)
   local api=$(
-    curl -s --noproxy "*" "http://0.0.0.0:${ql_port}/open/system/auth/reset?t=$currentTimeStamp" \
+    curl -s --noproxy "*" "http://localhost:${ql_port}/open/system/auth/reset?t=$currentTimeStamp" \
       -X 'PUT' \
       -H "Authorization: Bearer ${__ql_token__}" \
       -H "Content-Type: application/json;charset=UTF-8" \
@@ -214,9 +214,33 @@ update_auth_config() {
   code=$(echo "$api" | jq -r .code)
   message=$(echo "$api" | jq -r .message)
   if [[ $code == 200 ]]; then
-    echo -e "${tip}成功🎉"
+    t '%s成功🎉' "$tip"
   else
-    echo -e "${tip}失败(${message})"
+    t '%s失败(%s)' "$tip" "$message"
+  fi
+}
+
+record_cron_stat() {
+  local ref_id="$1"
+  local exit_code="${2:-0}"
+  local elapsed="${3:-0}"
+  [[ $ref_id ]] && [[ $ref_id -gt 0 ]] 2>/dev/null || return
+
+  local api=$(
+    curl -s --noproxy "*" "http://localhost:${ql_port:-5700}/open/dashboard/record" \
+    -X POST \
+    -H "Authorization: Bearer ${__ql_token__}" \
+    -H "Content-Type: application/json;charset=UTF-8" \
+    --data-raw "{\"ref_id\":$ref_id,\"code\":$exit_code,\"elapsed\":$elapsed}" \
+    --compressed
+  )
+  code=$(echo "$api" | jq -r .code)
+  message=$(echo "$api" | jq -r .message)
+  if [[ $code != 200 ]]; then
+    if [[ ! $message ]]; then
+      message="$api"
+    fi
+    echo -e "${message}"
   fi
 }
 

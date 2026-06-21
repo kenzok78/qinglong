@@ -4,9 +4,17 @@ dir_shell=$QL_DIR/shell
 . $dir_shell/share.sh
 . $dir_shell/api.sh
 
-trap "single_hanle" 2 3 20 15 14 19 1
+trap 'single_hanle SIGINT'  INT
+trap 'single_hanle SIGTERM' TERM
+trap 'single_hanle SIGHUP'  HUP
+trap 'single_hanle SIGALRM' ALRM
+trap 'single_hanle SIGTSTP' TSTP
+trap 'single_hanle SIGQUIT' QUIT
+
 single_hanle() {
-  eval MANUAL=true handle_task_end "$@" "$cmd"
+  _task_exit_code="${_task_exit_code:-$?}"
+  [[ "$_task_exit_code" == "0" ]] && _task_exit_code="1"
+  eval MANUAL=true handle_task_end "$@"
   exit 1
 }
 
