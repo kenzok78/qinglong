@@ -1,3 +1,5 @@
+import { shareStore } from './store';
+
 const messages: Record<string, Record<string, string>> = {
   zh: {},
   en: {
@@ -79,6 +81,8 @@ const messages: Record<string, Record<string, string>> = {
     'client_id 或 client_seret 有误': 'Invalid client_id or client_secret',
     '订阅执行完成': 'Subscription completed',
     'wxPusher 服务的 TopicIds 和 Uids 至少配置一个才行': 'wxPusher requires at least one of TopicIds or Uids',
+    'wxPusher SPT 不能为空': 'wxPusher SPT cannot be empty',
+    'wxPusher SPT 最多支持 10 个': 'wxPusher SPT supports at most 10 tokens',
     'Url 或者 Body 中必须包含 $title': 'Url or Body must contain $title',
     '绝对路径必须在日志目录内或使用 /dev/null':
       'Absolute path must be within log directory or use /dev/null',
@@ -129,6 +133,16 @@ const messages: Record<string, Record<string, string>> = {
     '执行before命令...': 'Execute before command...',
     '执行after命令...': 'Execute after command...',
     '## 执行结束... %s  耗时 %s 秒': '## Execution finished... %s  elapsed %s seconds',
+    '调度器注册失败，任务创建已回滚':
+      'Scheduler registration failed, task creation rolled back',
+    '调度器注册失败，任务更新已回滚':
+      'Scheduler registration failed, task update rolled back',
+    '调度器注册失败，任务启用已回滚':
+      'Scheduler registration failed, task enable rolled back',
+    '任务ID %s: 无效的 cron 表达式 "%s"（不支持裸 /N 步长和 ? 字符）':
+      'Task ID %s: invalid cron expression "%s" (bare /N steps and ? character not supported)',
+    '任务ID %s (extra_schedule): 无效的 cron 表达式 "%s"（不支持裸 /N 步长和 ? 字符）':
+      'Task ID %s (extra_schedule): invalid cron expression "%s" (bare /N steps and ? character not supported)',
   },
 };
 
@@ -136,10 +150,13 @@ let currentLang: string = 'zh';
 
 export function setLang(lang: string) {
   currentLang = lang || 'zh';
+  shareStore.setLang(currentLang);
 }
 
-export function getLang(): string {
-  return currentLang;
+/** 系统默认语言：Intl 检测 → 'zh'（仅返回 zh/en） */
+export function systemLang(): string {
+  const prefix = Intl.DateTimeFormat().resolvedOptions().locale.split('-')[0];
+  return prefix === 'en' ? 'en' : 'zh';
 }
 
 export function t(key: string, lang?: string): string {

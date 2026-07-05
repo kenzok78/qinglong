@@ -106,15 +106,28 @@ export default class CronService {
     }
 
     if (this.shouldUseCronClient(doc)) {
-      await cronClient.addCron([
-        {
-          name: doc.name || '',
-          id: String(doc.id),
-          schedule: doc.schedule!,
-          command: this.makeCommand(doc),
-          extra_schedules: doc.extra_schedules || [],
-        },
-      ]);
+      try {
+        await cronClient.addCron([
+          {
+            name: doc.name || '',
+            id: String(doc.id),
+            schedule: doc.schedule!,
+            command: this.makeCommand(doc),
+            extra_schedules: doc.extra_schedules || [],
+          },
+        ]);
+      } catch (error: any) {
+        // gRPC 注册失败时回滚 DB 记录，避免产生"僵尸任务"
+        // （DB 和 crontab.list 有记录但调度器永远不会执行）
+        await CrontabModel.destroy({ where: { id: doc.id } });
+        this.logger.error(
+          '[crontab] Failed to register cron job in scheduler, task creation rolled back:',
+          error?.message || error,
+        );
+        throw new Error(
+          `${t('调度器注册失败，任务创建已回滚')}: ${(error as any)?.details || error?.message}`,
+        );
+      }
     }
 
     await this.setCrontab();
@@ -136,18 +149,55 @@ export default class CronService {
       return newDoc;
     }
 
-    await cronClient.delCron([String(newDoc.id)]);
+    try {
+      await cronClient.delCron([String(newDoc.id)]);
+    } catch (error: any) {
+      this.logger.warn(
+        '[crontab] Failed to unregister cron job in scheduler:',
+        error?.message || error,
+      );
+    }
 
     if (this.shouldUseCronClient(newDoc)) {
-      await cronClient.addCron([
-        {
-          name: doc.name || '',
-          id: String(newDoc.id),
-          schedule: newDoc.schedule!,
-          command: this.makeCommand(newDoc),
-          extra_schedules: newDoc.extra_schedules || [],
-        },
-      ]);
+      try {
+        await cronClient.addCron([
+          {
+            name: doc.name || '',
+            id: String(newDoc.id),
+            schedule: newDoc.schedule!,
+            command: this.makeCommand(newDoc),
+            extra_schedules: newDoc.extra_schedules || [],
+          },
+        ]);
+      } catch (error: any) {
+        // gRPC 注册新任务失败 → 回滚 DB 到旧数据，并尝试恢复旧调度注册
+        await CrontabModel.update(doc, { where: { id: doc.id } });
+        if (this.shouldUseCronClient(doc)) {
+          try {
+            await cronClient.addCron([
+              {
+                name: doc.name || '',
+                id: String(doc.id),
+                schedule: doc.schedule!,
+                command: this.makeCommand(doc),
+                extra_schedules: doc.extra_schedules || [],
+              },
+            ]);
+          } catch (_recoveryError: any) {
+            this.logger.warn(
+              '[crontab] Failed to restore old cron job in scheduler after rollback:',
+              _recoveryError?.message || _recoveryError,
+            );
+          }
+        }
+        this.logger.error(
+          '[crontab] Failed to register updated cron job in scheduler, update rolled back:',
+          error?.message || error,
+        );
+        throw new Error(
+          `${t('调度器注册失败，任务更新已回滚')}: ${(error as any)?.details || error?.message}`,
+        );
+      }
     }
 
     await this.setCrontab();
@@ -166,6 +216,7 @@ export default class CronService {
     log_path,
     last_running_time = 0,
     last_execution_time = 0,
+    exit_code,
   }: {
     ids: number[];
     status: CrontabStatus;
@@ -173,6 +224,7 @@ export default class CronService {
     log_path: string;
     last_running_time: number;
     last_execution_time: number;
+    exit_code?: number;
   }) {
     let options: any = {
       status,
@@ -209,10 +261,15 @@ export default class CronService {
       } else if (status === CrontabStatus.idle) {
         // Mark the matching running instance as finished
         const finishedAt = dayjs().unix();
+        const instanceStatus =
+          exit_code !== undefined && exit_code !== null && exit_code !== 0
+            ? InstanceStatus.error
+            : InstanceStatus.finished;
         await RunningInstanceModel.update(
           {
             finished_at: finishedAt,
-            status: InstanceStatus.finished,
+            status: instanceStatus,
+            exit_code: exit_code ?? undefined,
           },
           {
             where: {
@@ -233,7 +290,14 @@ export default class CronService {
 
   public async remove(ids: number[]) {
     await CrontabModel.destroy({ where: { id: ids } });
-    await cronClient.delCron(ids.map(String));
+    try {
+      await cronClient.delCron(ids.map(String));
+    } catch (error: any) {
+      this.logger.warn(
+        '[crontab] Failed to unregister cron job in scheduler:',
+        error?.message || error,
+      );
+    }
     await this.setCrontab();
   }
 
@@ -564,7 +628,7 @@ export default class CronService {
       }
     }
     await RunningInstanceModel.update(
-      { status: InstanceStatus.stopped, finished_at: dayjs().unix() },
+      { status: InstanceStatus.stopped, finished_at: dayjs().unix(), exit_code: 143 },
       { where: { id: instanceId } },
     );
 
@@ -619,15 +683,6 @@ export default class CronService {
           { shell: '/bin/bash' },
         );
 
-        const startedAt = dayjs().unix();
-        const instance = await RunningInstanceModel.create({
-          cron_id: id!,
-          pid: cp.pid,
-          log_path: logPath,
-          started_at: startedAt,
-          status: InstanceStatus.running,
-        });
-
         await CrontabModel.update(
           { status: CrontabStatus.running, pid: cp.pid, log_path: logPath },
           { where: { id } },
@@ -659,26 +714,6 @@ export default class CronService {
             code,
           );
           await logStreamManager.closeStream(absolutePath);
-          const finishedAt = dayjs().unix();
-          await RunningInstanceModel.update(
-            {
-              finished_at: finishedAt,
-              status: code === 0 ? InstanceStatus.finished : InstanceStatus.error,
-              exit_code: code ?? undefined,
-            },
-            { where: { id: instance.id } },
-          );
-
-          // Only set cron to idle if no other running instances exist
-          const otherRunning = await RunningInstanceModel.count({
-            where: { cron_id: id!, status: InstanceStatus.running },
-          });
-          if (otherRunning === 0) {
-            await CrontabModel.update(
-              { status: CrontabStatus.idle, pid: undefined },
-              { where: { id } },
-            );
-          }
           resolve({ ...params, pid: cp.pid, code });
         });
       });
@@ -687,7 +722,14 @@ export default class CronService {
 
   public async disabled(ids: number[]) {
     await CrontabModel.update({ isDisabled: 1 }, { where: { id: ids } });
-    await cronClient.delCron(ids.map(String));
+    try {
+      await cronClient.delCron(ids.map(String));
+    } catch (error: any) {
+      this.logger.warn(
+        '[crontab] Failed to unregister cron job in scheduler:',
+        error?.message || error,
+      );
+    }
     await this.setCrontab();
   }
 
@@ -708,7 +750,19 @@ export default class CronService {
       return;
     }
 
-    await cronClient.addCron(crons);
+    try {
+      await cronClient.addCron(crons);
+    } catch (error: any) {
+      // gRPC 注册失败 → 回滚启用状态，避免 DB 显示已启用但调度器未注册
+      await CrontabModel.update({ isDisabled: 1 }, { where: { id: ids } });
+      this.logger.error(
+        '[crontab] Failed to register cron job in scheduler, enable rolled back:',
+        error?.message || error,
+      );
+      throw new Error(
+        `${t('调度器注册失败，任务启用已回滚')}: ${(error as any)?.details || error?.message}`,
+      );
+    }
     await this.setCrontab();
   }
 
@@ -886,8 +940,19 @@ export default class CronService {
       await writeFileWithLock(config.crontabFile, '');
       return;
     }
-    await cronClient.addCron(regularCrons);
-    this.setCrontab(tabs);
+
+    // 先同步 crontab.list 与系统 crontab，确保其始终反映数据库真实状态。
+    // gRPC 调度注册为尽力而为：失败时不阻断文件同步，调度器重启后会重新注册。
+    // 这避免了因调度器短暂不可用导致 crontab.list 与数据库脱节（订阅更新误判任务已存在）。
+    await this.setCrontab(tabs);
+    try {
+      await cronClient.addCron(regularCrons);
+    } catch (error: any) {
+      this.logger.warn(
+        '[crontab] Failed to register cron job in scheduler:',
+        error?.message || error,
+      );
+    }
   }
 
   public async bootTask() {
