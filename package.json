@@ -1,7 +1,7 @@
 {
   "name": "@whyour/qinglong",
   "packageManager": "pnpm@8.3.1",
-  "version": "2.21.0-11",
+  "version": "2.21.0-13",
   "description": "Timed task management platform supporting Python3, JavaScript, Shell, Typescript",
   "repository": {
     "type": "git",
