@@ -5,13 +5,13 @@ import { Logger } from 'winston';
 import config from '../config';
 import { t } from '../shared/i18n';
 import {
-  getFileContentByName,
   readDirs,
   removeAnsi,
   rmPath,
 } from '../config/util';
 import LogService from '../services/log';
 import { InstanceStatus, RunningInstanceModel } from '../data/runningInstance';
+import { MAX_LOG_CHUNK_BYTES, readLogChunk } from '../shared/logReader';
 const route = Router();
 const blacklist = ['.tmp'];
 
@@ -34,6 +34,20 @@ export default (app: Router) => {
 
   route.get(
     '/detail',
+    celebrate({
+      query: Joi.object({
+        path: Joi.string().allow('').optional(),
+        file: Joi.string().required(),
+        offset: Joi.number().integer().min(0).optional(),
+        limit: Joi.number()
+          .integer()
+          .min(1)
+          .max(MAX_LOG_CHUNK_BYTES)
+          .optional(),
+        tail: Joi.boolean().optional(),
+        t: Joi.string().optional(),
+      }).unknown(true),
+    }),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
         const logService = Container.get(LogService);
@@ -52,11 +66,19 @@ export default (app: Router) => {
           where: { log_path: logPath, status: InstanceStatus.running },
         });
 
-        const content = await getFileContentByName(finalPath);
+        const chunk = await readLogChunk(finalPath, {
+          offset: req.query.offset as unknown as number,
+          limit: req.query.limit as unknown as number,
+          tail: req.query.tail as unknown as boolean,
+        });
         res.send({
           code: 200,
-          data: removeAnsi(content),
+          data: removeAnsi(chunk.content),
           logStatus: runningInstance ? 'running' : undefined,
+          offset: chunk.offset,
+          nextOffset: chunk.nextOffset,
+          total: chunk.total,
+          truncated: chunk.truncated,
         });
       } catch (e) {
         return next(e);
@@ -66,24 +88,11 @@ export default (app: Router) => {
 
   route.get(
     '/:file',
-    async (req: Request, res: Response, next: NextFunction) => {
-      try {
-        const logService = Container.get(LogService);
-        const finalPath = logService.checkFilePath(
-          (req.query.path as string) || '',
-          (req.params.file as string) || '',
-        );
-        if (!finalPath || blacklist.includes(req.query.path as string)) {
-          return res.send({
-            code: 403,
-            message: t('暂无权限'),
-          });
-        }
-        const content = await getFileContentByName(finalPath);
-        res.send({ code: 200, data: content });
-      } catch (e) {
-        return next(e);
-      }
+    (req: Request, res: Response) => {
+      return res.send({
+        code: 410,
+        message: t('接口已下线，请使用 /logs/detail 接口'),
+      });
     },
   );
 

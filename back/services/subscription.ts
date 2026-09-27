@@ -33,6 +33,7 @@ import { CrontabModel } from '../data/cron';
 import CrontabService from './cron';
 import taskLimit from '../shared/pLimit';
 import { logStreamManager } from '../shared/logStreamManager';
+import { LogReadOptions, readLogChunk } from '../shared/logReader';
 
 @Service()
 export default class SubscriptionService {
@@ -158,48 +159,54 @@ export default class SubscriptionService {
         );
       },
       onEnd: async (cp, endTime, diff) => {
-        const sub = await this.getDb({ id: doc.id });
-        const absolutePath = await handleLogPath(sub.log_path as string);
-
-        // 执行 sub_after
-        let afterStr = '';
+        let absolutePath: string | undefined;
         try {
-          if (sub.sub_after) {
-            await logStreamManager.write(absolutePath, `\n\n## ${t('执行after命令...')}\n\n`);
-            afterStr = await promiseExec(sub.sub_after);
+          const sub = await this.getDb({ id: doc.id });
+          absolutePath = await handleLogPath(sub.log_path as string);
+
+          // 执行 sub_after
+          let afterStr = '';
+          try {
+            if (sub.sub_after) {
+              await logStreamManager.write(
+                absolutePath,
+                `\n\n## ${t('执行after命令...')}\n\n`,
+              );
+              afterStr = await promiseExec(sub.sub_after);
+            }
+          } catch (error: any) {
+            afterStr =
+              (error.stderr && error.stderr.toString()) || JSON.stringify(error);
           }
-        } catch (error: any) {
-          afterStr =
-            (error.stderr && error.stderr.toString()) || JSON.stringify(error);
+          if (afterStr) {
+            await logStreamManager.write(absolutePath, `${afterStr}\n`);
+          }
+
+          await logStreamManager.write(
+            absolutePath,
+            '\n' +
+              tf(
+                '## 执行结束... %s  耗时 %s 秒',
+                endTime.format('YYYY-MM-DD HH:mm:ss'),
+                String(diff),
+              ) +
+              LOG_END_SYMBOL,
+          );
+        } finally {
+          try {
+            if (absolutePath) await logStreamManager.closeStream(absolutePath);
+          } finally {
+            await SubscriptionModel.update(
+              { status: SubscriptionStatus.idle, pid: null } as any,
+              { where: { id: doc.id } },
+            );
+            this.sockService.sendMessage({
+              type: 'runSubscriptionEnd',
+              message: t('订阅执行完成'),
+              references: [doc.id as number],
+            });
+          }
         }
-        if (afterStr) {
-          await logStreamManager.write(absolutePath, `${afterStr}\n`);
-        }
-
-        await logStreamManager.write(
-          absolutePath,
-          '\n' +
-            tf(
-              '## 执行结束... %s  耗时 %s 秒',
-              endTime.format('YYYY-MM-DD HH:mm:ss'),
-              String(diff),
-            ) +
-            LOG_END_SYMBOL,
-        );
-
-        // Close the stream after task completion
-        await logStreamManager.closeStream(absolutePath);
-
-        await SubscriptionModel.update(
-          { status: SubscriptionStatus.idle, pid: undefined },
-          { where: { id: sub.id } },
-        );
-
-        this.sockService.sendMessage({
-          type: 'runSubscriptionEnd',
-          message: t('订阅执行完成'),
-          references: [doc.id as number],
-        });
       },
       onError: async (message: string) => {
         const sub = await this.getDb({ id: doc.id });
@@ -315,20 +322,22 @@ export default class SubscriptionService {
 
   public async stop(ids: number[]) {
     const docs = await SubscriptionModel.findAll({ where: { id: ids } });
+    let failure: unknown;
     for (const doc of docs) {
-      if (doc.pid) {
-        try {
-          await killTask(doc.pid);
-        } catch (error) {
-          this.logger.error(error);
+      try {
+        if (doc.pid) {
+          await killTask(doc.pid, true);
         }
+        await SubscriptionModel.update(
+          { status: SubscriptionStatus.idle, pid: null } as any,
+          { where: { id: doc.id, pid: doc.pid ?? null } },
+        );
+      } catch (error) {
+        this.logger.error(error);
+        failure ??= error;
       }
     }
-
-    await SubscriptionModel.update(
-      { status: SubscriptionStatus.idle, pid: undefined },
-      { where: { id: ids } },
-    );
+    if (failure) throw failure;
   }
 
   private async runSingle(subscriptionId: number) {
@@ -366,14 +375,20 @@ export default class SubscriptionService {
     }
   }
 
-  public async log(id: number) {
+  public async log(id: number, options: LogReadOptions = {}) {
     const doc = await this.getDb({ id });
     if (!doc || !doc.log_path) {
-      return '';
+      return {
+        content: '',
+        offset: 0,
+        nextOffset: 0,
+        total: 0,
+        truncated: false,
+      };
     }
 
     const absolutePath = await handleLogPath(doc.log_path as string);
-    return await getFileContentByName(absolutePath);
+    return await readLogChunk(absolutePath, options);
   }
 
   public async logs(id: number) {

@@ -14,30 +14,32 @@ import { AuthInfo } from '../data/system';
 import path from 'path';
 import { t } from '../shared/i18n';
 import { AppScope } from '../data/open';
+import protectedPathCase from '../middlewares/protectedPathCase';
+
+function resolveTrustProxy(value = process.env.QL_TRUST_PROXY) {
+  const setting = value?.trim();
+  if (!setting) {
+    return 'loopback';
+  }
+  if (setting === 'true' || setting === 'false') {
+    return setting === 'true';
+  }
+  if (/^\d+$/.test(setting)) {
+    return Number(setting);
+  }
+  return setting;
+}
 
 export default ({ app }: { app: Application }) => {
   // Security: Enable strict routing to prevent case-insensitive path bypass
   app.set('case sensitive routing', true);
   app.set('strict routing', true);
-  app.set('trust proxy', 'loopback');
+  app.set('trust proxy', resolveTrustProxy());
   app.use(cors());
 
-  // Security: Path normalization middleware to prevent case variation attacks
-  app.use((req, res, next) => {
-    const originalPath = req.path;
-    const normalizedPath = originalPath.toLowerCase();
-
-    // Block requests with case variations on protected paths
-    if (originalPath !== normalizedPath &&
-      (normalizedPath.startsWith('/api/') || normalizedPath.startsWith('/open/'))) {
-      return res.status(400).json({
-        code: 400,
-        message: 'Invalid path format'
-      });
-    }
-
-    next();
-  });
+  // Security: Reject case variations under protected API namespaces before
+  // authentication checks can interpret the request differently from routing.
+  app.use(protectedPathCase);
 
   // Rewrite URLs to strip baseUrl prefix if configured
   // This allows the rest of the app to work without baseUrl awareness
@@ -46,7 +48,26 @@ export default ({ app }: { app: Application }) => {
   }
 
   app.get(`${config.api.prefix}/env.js`, serveEnv);
-  app.use(`${config.api.prefix}/static`, express.static(config.uploadPath));
+  app.use(
+    `${config.api.prefix}/static`,
+    express.static(config.uploadPath, {
+      setHeaders: (res) => {
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
+      },
+    }),
+  );
+
+  const credentialPaths = ['/api', '/open'].flatMap((prefix) =>
+    ['/user/login', '/user/init', '/user/two-factor/login'].map(
+      (route) => `${prefix}${route}`,
+    ),
+  );
+  app.use(
+    credentialPaths,
+    bodyParser.json({ limit: '16kb' }),
+    bodyParser.urlencoded({ limit: '16kb', extended: false }),
+  );
 
   app.use(bodyParser.json({ limit: '50mb' }));
   app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
@@ -97,7 +118,10 @@ export default ({ app }: { app: Application }) => {
           return next(err);
         }
 
-        if (!currentToken || currentToken.expiration < Math.round(Date.now() / 1000)) {
+        if (
+          !currentToken ||
+          currentToken.expiration < Math.round(Date.now() / 1000)
+        ) {
           const err = new UnauthorizedError('invalid_token', {
             message: t('Token 已失效'),
           });
@@ -118,14 +142,12 @@ export default ({ app }: { app: Application }) => {
     }
 
     const authInfo = await shareStore.getAuthInfo();
-    if (isValidToken(authInfo, headerToken, req.platform)) {
+    if (isValidToken(authInfo, headerToken, req.platform, config.jwt.secret)) {
       return next();
     }
 
     const errorCode = headerToken ? 'invalid_token' : 'credentials_required';
-    const errorMessage = headerToken
-      ? t('Token 已失效')
-      : t('请先登录');
+    const errorMessage = headerToken ? t('Token 已失效') : t('请先登录');
     const err = new UnauthorizedError(errorCode, { message: errorMessage });
     next(err);
   });
@@ -142,8 +164,7 @@ export default ({ app }: { app: Application }) => {
     ) {
       return next();
     }
-    const authInfo =
-      (await shareStore.getAuthInfo()) || ({} as AuthInfo);
+    const authInfo = (await shareStore.getAuthInfo()) || ({} as AuthInfo);
 
     let isInitialized = !isDefaultAuthInfo(authInfo);
 

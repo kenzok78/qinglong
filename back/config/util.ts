@@ -12,6 +12,7 @@ import { DependenceTypes } from '../data/dependence';
 import { FormData } from 'undici';
 import os from 'os';
 import { maybeSudo, isInContainer } from './container';
+import { resolveFileAccess } from '../shared/fileAccess';
 
 export * from './share';
 
@@ -144,7 +145,8 @@ export async function handleLogPath(
   logPath: string,
   data: string = '',
 ): Promise<string> {
-  const absolutePath = path.resolve(config.logPath, logPath);
+  const absolutePath = resolveFileAccess(config.logPath, [logPath]);
+  if (!absolutePath) throw new Error('Log path is outside the log directory');
   const logFileExist = await fileExist(absolutePath);
   if (!logFileExist) {
     await createFile(absolutePath, data);
@@ -214,48 +216,105 @@ export function dirSort(a: IFile, b: IFile): number {
   }
 }
 
+const FILE_SYSTEM_READ_CONCURRENCY = 32;
+
+type FileSystemTaskRunner = <T>(task: () => Promise<T>) => Promise<T>;
+
+function createFileSystemTaskRunner(concurrency: number): FileSystemTaskRunner {
+  let activeCount = 0;
+  const queue: Array<() => void> = [];
+
+  const runNext = () => {
+    while (activeCount < concurrency && queue.length > 0) {
+      activeCount += 1;
+      queue.shift()?.();
+    }
+  };
+
+  return <T>(task: () => Promise<T>) =>
+    new Promise<T>((resolve, reject) => {
+      queue.push(() => {
+        task()
+          .then(resolve, reject)
+          .finally(() => {
+            activeCount -= 1;
+            runNext();
+          });
+      });
+      runNext();
+    });
+}
+
+async function readDirsWithRunner(
+  dir: string,
+  baseDir: string,
+  blacklist: string[],
+  sort: (a: IFile, b: IFile) => number,
+  runFileSystemTask: FileSystemTaskRunner,
+): Promise<IFile[]> {
+  const relativePath = path.relative(baseDir, dir);
+  const entries = await runFileSystemTask(() =>
+    fs.readdir(dir, { withFileTypes: true }),
+  );
+
+  const items = await Promise.all(
+    entries.map(async (entry): Promise<IFile | undefined> => {
+      if (blacklist.includes(entry.name) || entry.isSymbolicLink()) {
+        return undefined;
+      }
+
+      const subPath = path.join(dir, entry.name);
+      const stats = await runFileSystemTask(() => fs.lstat(subPath));
+      if (stats.isSymbolicLink()) {
+        return undefined;
+      }
+      const key = path.join(relativePath, entry.name);
+
+      if (stats.isDirectory()) {
+        const children = await readDirsWithRunner(
+          subPath,
+          baseDir,
+          blacklist,
+          sort,
+          runFileSystemTask,
+        );
+        return {
+          title: entry.name,
+          key,
+          type: 'directory',
+          parent: relativePath,
+          createTime: stats.birthtime.getTime(),
+          children,
+        };
+      }
+
+      return {
+        title: entry.name,
+        type: 'file',
+        key,
+        parent: relativePath,
+        size: stats.size,
+        createTime: stats.birthtime.getTime(),
+      };
+    }),
+  );
+
+  return items.filter((item): item is IFile => Boolean(item)).sort(sort);
+}
+
 export async function readDirs(
   dir: string,
   baseDir: string = '',
   blacklist: string[] = [],
   sort: (a: IFile, b: IFile) => number = dirSort,
 ): Promise<IFile[]> {
-  const relativePath = path.relative(baseDir, dir);
-  const files = await fs.readdir(dir);
-  const result: IFile[] = [];
-
-  for (const file of files) {
-    const subPath = path.join(dir, file);
-    const stats = await fs.lstat(subPath);
-    const key = path.join(relativePath, file);
-
-    if (blacklist.includes(file) || stats.isSymbolicLink()) {
-      continue;
-    }
-
-    if (stats.isDirectory()) {
-      const children = await readDirs(subPath, baseDir, blacklist, sort);
-      result.push({
-        title: file,
-        key,
-        type: 'directory',
-        parent: relativePath,
-        createTime: stats.birthtime.getTime(),
-        children: children.sort(sort),
-      });
-    } else {
-      result.push({
-        title: file,
-        type: 'file',
-        key,
-        parent: relativePath,
-        size: stats.size,
-        createTime: stats.birthtime.getTime(),
-      });
-    }
-  }
-
-  return result.sort(sort);
+  return readDirsWithRunner(
+    dir,
+    baseDir,
+    blacklist,
+    sort,
+    createFileSystemTaskRunner(FILE_SYSTEM_READ_CONCURRENCY),
+  );
 }
 
 export async function readDir(
@@ -430,18 +489,69 @@ export function psTree(pid: number): Promise<number[]> {
   });
 }
 
-export async function killTask(pid: number) {
-  const pids = await psTree(pid);
-
-  if (pids.length) {
+export async function killTask(pid: number, waitForExit = false) {
+  const descendants = await psTree(pid);
+  const signal = (target: number, sig: NodeJS.Signals) => {
     try {
-      [pid, ...pids].reverse().forEach((x) => {
-        process.kill(x, 15);
-      });
-    } catch (error) { }
-  } else {
-    process.kill(pid, 2);
+      process.kill(target, sig);
+    } catch (error: any) {
+      if (error.code !== 'ESRCH') throw error;
+    }
+  };
+  if (!waitForExit) {
+    if (descendants.length) {
+      // A child may exit after psTree; keep signalling the remaining tree.
+      for (const target of [pid, ...descendants].reverse()) {
+        signal(target, 'SIGTERM');
+      }
+    } else signal(pid, 'SIGINT');
+    return;
   }
+  const pids = [...descendants.reverse(), pid];
+  for (const target of pids) signal(target, 'SIGTERM');
+  const alive = async (target: number) => {
+    try {
+      process.kill(target, 0);
+    } catch (error: any) {
+      if (error.code === 'ESRCH') return false;
+      throw error;
+    }
+    if (process.platform === 'linux') {
+      try {
+        const stat = await fs.readFile(`/proc/${target}/stat`, 'utf8');
+        // The command field may contain spaces and parentheses. Zombies have
+        // exited even while their parent has not reaped the PID yet.
+        const state = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0];
+        if (['Z', 'X', 'x'].includes(state)) return false;
+      } catch {
+        // /proc may be unavailable, or the process may have just exited.
+        // Retain the portable signal probe rather than assuming it is dead.
+        try {
+          process.kill(target, 0);
+        } catch (error: any) {
+          if (error.code === 'ESRCH') return false;
+          throw error;
+        }
+      }
+    }
+    return true;
+  };
+  const wait = async () => {
+    const deadline = Date.now() + 1000;
+    let remaining = pids;
+    while (true) {
+      const states = await Promise.all(remaining.map(alive));
+      remaining = remaining.filter((_, index) => states[index]);
+      if (!remaining.length || Date.now() >= deadline) return remaining;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  };
+  let remaining = await wait();
+  if (!remaining.length) return;
+  for (const target of remaining) signal(target, 'SIGKILL');
+  remaining = await wait();
+  if (remaining.length)
+    throw new Error(`Task processes did not exit: ${remaining.join(', ')}`);
 }
 
 export async function getPid(cmd: string) {
@@ -541,11 +651,7 @@ export function safeJSONParse(value?: string) {
   }
 }
 
-export function errStack(error: unknown): string {
-  return error instanceof Error && error.stack
-    ? error.stack
-    : String(error);
-}
+export { errStack } from '../shared/errors';
 
 export async function rmPath(path: string) {
   try {
